@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Auth App</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <div class="container" id="mainContainer">
+
+        <h1>My Auth App</h1>
+
+        <button class="skip-button" onclick="showRequestForm()">
+            Skip Login / Registration
+        </button>
+
+        <div class="form-container">
+
+            <h2>Register</h2>
+
+            <input type="text" id="registerUsername" placeholder="Username">
+            <input type="email" id="registerEmail" placeholder="Email">
+            <input type="password" id="registerPassword" placeholder="Password">
+
+            <button onclick="register()">Register</button>
+
+            <p id="registerMessage"></p>
+
+        </div>
+
+        <div class="form-container">
+
+            <h2>Login</h2>
+
+            <input type="email" id="loginEmail" placeholder="Email">
+            <input type="password" id="loginPassword" placeholder="Password">
+
+            <button onclick="login()">Login</button>
+
+            <p id="loginMessage"></p>
+
+        </div>
+
+    </div>
+
+
+    <!-- REQUEST SCREEN -->
+
+    <div class="request-screen" id="requestScreen">
+
+        <div class="request-box">
+
+            <h1>Leave a Request</h1>
+
+            <p>
+                Tell us what you need help with and someone will
+                contact you shortly.
+            </p>
+
+            <textarea
+                id="requestMessage"
+                placeholder="Describe your request..."
+                rows="6">
+            </textarea>
+
+            <p class="error-message" id="requestError"></p>
+
+            <input
+                type="tel"
+                id="requestPhone"
+                placeholder="Phone number">
+
+            <p class="error-message" id="phoneError"></p>
+
+            <button onclick="submitRequest()">
+                Submit Request
+            </button>
+
+            <button class="back-button" onclick="backToLogin()">
+                Back
+            </button>
+
+            <div id="requestSuccess"></div>
+
+        </div>
+
+    </div>
+
+
+    <script src="script.js"></script>
+
+</body>
+</html>
