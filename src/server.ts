@@ -1,6 +1,8 @@
+import "dotenv/config";
 import path from "path";
-import express from "express";  
+import express from "express";
 import bcrypt from "bcrypt";
+import { connectDB } from "./config/db";
 
 interface User {
     id: number;
@@ -11,7 +13,7 @@ interface User {
 
 const app = express();
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 const users: User[] = [];
 
@@ -173,6 +175,17 @@ app.post("/requests", (req, res) => {
     });
 });
 
-app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
-});
+async function startServer(): Promise<void> {
+    try {
+        await connectDB();
+
+        app.listen(PORT, () => {
+            console.log(`Server is running on http://localhost:${PORT}`);
+        });
+    } catch (error) {
+        console.error("Failed to start server:", error);
+        process.exit(1);
+    }
+}
+
+startServer();
