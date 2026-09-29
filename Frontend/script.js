@@ -174,3 +174,13 @@ async function submitRequest() {
         </p>
     `;
 }
+
+// Connect buttons to their functions.
+// (Inline onclick="..." attributes are blocked by the Content Security Policy that Helmet sets.)
+document.getElementById("skipButton").addEventListener("click", showRequestForm);
+document.getElementById("registerButton").addEventListener("click", register);
+document.getElementById("loginButton").addEventListener("click", login);
+document.getElementById("profileButton").addEventListener("click", loadProfile);
+document.getElementById("logoutButton").addEventListener("click", logout);
+document.getElementById("submitRequestButton").addEventListener("click", submitRequest);
+document.getElementById("backButton").addEventListener("click", backToLogin);

@@ -4,9 +4,12 @@ import express from "express";
 import bcrypt from "bcrypt";
 import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
+import helmet from "helmet";
 import { connectDB } from "./config/db";
 import { getJwtSecret, JWT_EXPIRES_IN } from "./config/jwt";
 import { requireAuth } from "./middleware/auth";
+import { authLimiter, guestRequestLimiter } from "./middleware/rateLimiters";
+import { notFound, errorHandler } from "./middleware/errorHandler";
 import { User } from "./models/User";
 import { GuestRequest } from "./models/GuestRequest";
 import { registerSchema, loginSchema } from "./validation/auth.schemas";
@@ -16,7 +19,8 @@ const app = express();
 
 const PORT = Number(process.env.PORT) || 3000;
 
-app.use(express.json());
+app.use(helmet());                         // security-related HTTP headers
+app.use(express.json({ limit: "10kb" }));  // reject oversized request bodies
 app.use(express.static(path.join(__dirname, "../Frontend")));
 
 app.get("/", (req, res) => {
@@ -60,7 +64,7 @@ app.get("/profile", requireAuth, async (req, res) => {
     });
 });
 
-app.post("/register", async (req, res) => {
+app.post("/register", authLimiter, async (req, res) => {
     // Runtime validation: req.body comes from the client and can contain anything
     const result = registerSchema.safeParse(req.body);
 
@@ -110,12 +114,12 @@ app.post("/register", async (req, res) => {
             });
         }
 
-        console.error("Registration error:", error);
-        res.status(500).json({ message: "Something went wrong" });
+        // Anything else is unexpected: let the global error handler deal with it
+        throw error;
     }
 });
 
-app.post("/login", async (req, res) => {
+app.post("/login", authLimiter, async (req, res) => {
     const result = loginSchema.safeParse(req.body);
 
     if (!result.success) {
@@ -158,7 +162,7 @@ app.post("/login", async (req, res) => {
     });
 });
 
-app.post("/requests", async (req, res) => {
+app.post("/requests", guestRequestLimiter, async (req, res) => {
 
     // Validate message length and Egyptian phone format
     const result = guestRequestSchema.safeParse(req.body);
@@ -179,6 +183,10 @@ app.post("/requests", async (req, res) => {
         message: "Request submitted successfully"
     });
 });
+
+// These must come AFTER all routes: Express tries middleware in the order it was added
+app.use(notFound);
+app.use(errorHandler);
 
 async function startServer(): Promise<void> {
     try {

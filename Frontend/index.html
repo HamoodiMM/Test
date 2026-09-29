@@ -13,7 +13,7 @@
 
         <h1>My Auth App</h1>
 
-        <button class="skip-button" onclick="showRequestForm()">
+        <button class="skip-button" id="skipButton">
             Skip Login / Registration
         </button>
 
@@ -25,7 +25,7 @@
             <input type="email" id="registerEmail" placeholder="Email">
             <input type="password" id="registerPassword" placeholder="Password">
 
-            <button onclick="register()">Register</button>
+            <button id="registerButton">Register</button>
 
             <p id="registerMessage"></p>
 
@@ -38,7 +38,7 @@
             <input type="email" id="loginEmail" placeholder="Email">
             <input type="password" id="loginPassword" placeholder="Password">
 
-            <button onclick="login()">Login</button>
+            <button id="loginButton">Login</button>
 
             <p id="loginMessage"></p>
 
@@ -48,8 +48,8 @@
 
             <h2>Profile</h2>
 
-            <button onclick="loadProfile()">View Profile</button>
-            <button onclick="logout()">Logout</button>
+            <button id="profileButton">View Profile</button>
+            <button id="logoutButton">Logout</button>
 
             <p id="profileMessage"></p>
 
@@ -86,11 +86,11 @@
 
             <p class="error-message" id="phoneError"></p>
 
-            <button onclick="submitRequest()">
+            <button id="submitRequestButton">
                 Submit Request
             </button>
 
-            <button class="back-button" onclick="backToLogin()">
+            <button class="back-button" id="backButton">
                 Back
             </button>
 
