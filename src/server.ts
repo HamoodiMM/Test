@@ -2,20 +2,15 @@ import "dotenv/config";
 import path from "path";
 import express from "express";
 import bcrypt from "bcrypt";
+import mongoose from "mongoose";
 import { connectDB } from "./config/db";
-
-interface User {
-    id: number;
-    username: string;
-    email: string;
-    password: string;
-}
+import { User } from "./models/User";
 
 const app = express();
 
 const PORT = Number(process.env.PORT) || 3000;
 
-const users: User[] = [];
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 interface Request {
     id: number;
@@ -40,16 +35,33 @@ app.get("/about", (req, res) => {
     res.send("Test Test.");
 });
 
-app.get("/users", (req, res) => {
+// Password is excluded automatically because of `select: false` in the User schema
+app.get("/users", async (req, res) => {
+    const users = await User.find();
     res.json(users);
 });
 
 app.post("/register", async (req, res) => {
     const { username, email, password } = req.body;
 
-    if (!username || !email || !password) {
+    if (
+        typeof username !== "string" ||
+        typeof email !== "string" ||
+        typeof password !== "string" ||
+        !username.trim() ||
+        !email.trim() ||
+        !password
+    ) {
         return res.status(400).json({
             message: "Username, email and password are required"
+        });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!emailRegex.test(normalizedEmail)) {
+        return res.status(400).json({
+            message: "Please provide a valid email address"
         });
     }
 
@@ -59,44 +71,61 @@ app.post("/register", async (req, res) => {
         });
     }
 
-    const existingUser = users.find(user => user.email === email);
+    try {
+        const existingUser = await User.findOne({ email: normalizedEmail });
 
-    if (existingUser) {
-        return res.status(400).json({
-            message: "Email is already registered"
+        if (existingUser) {
+            return res.status(409).json({
+                message: "Email is already registered"
+            });
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        const newUser = await User.create({
+            username: username,
+            email: normalizedEmail,
+            password: hashedPassword
         });
+
+        res.status(201).json({
+            message: "User registered successfully",
+            user: {
+                id: newUser._id,
+                username: newUser.username,
+                email: newUser.email
+            }
+        });
+    } catch (error) {
+        // Schema rules failed (e.g. username shorter than 3 characters)
+        if (error instanceof mongoose.Error.ValidationError) {
+            const firstError = Object.values(error.errors)[0];
+            return res.status(400).json({ message: firstError.message });
+        }
+
+        // Unique index violation: two registrations with the same email at the same moment
+        if ((error as { code?: number }).code === 11000) {
+            return res.status(409).json({
+                message: "Email is already registered"
+            });
+        }
+
+        console.error("Registration error:", error);
+        res.status(500).json({ message: "Something went wrong" });
     }
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    const newUser: User = {
-        id: users.length + 1,
-        username: username,
-        email: email,
-        password: hashedPassword
-    };
-
-    users.push(newUser);
-
-res.status(201).json({
-    message: "User registered successfully",
-    user: {
-        id: newUser.id,
-        username: newUser.username,
-        email: newUser.email
-    }
-    }); 
 });
 
 app.post("/login", async (req, res) => {
     const { email, password } = req.body;
 
-    if (!email || !password) {
+    if (typeof email !== "string" || typeof password !== "string" || !email.trim() || !password) {
         return res.status(400).json({
             message: "Email and password are required"
         });
     }
 
-    const user = users.find(user => user.email === email);
+    // `+password` re-includes the field that the schema hides by default
+    const user = await User.findOne({ email: email.trim().toLowerCase() }).select("+password");
 
     if (!user) {
         return res.status(401).json({
@@ -115,7 +144,7 @@ app.post("/login", async (req, res) => {
     res.json({
         message: "Login successful",
         user: {
-            id: user.id,
+            id: user._id,
             username: user.username,
             email: user.email
         }
