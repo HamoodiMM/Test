@@ -47,12 +47,12 @@ Log in first; the frontend stores the token in `localStorage`.
 
 | ☐ | Case | How | Expected |
 |---|---|---|---|
-| ☐ | No token | Click **View Profile** while logged out, or no `Authorization` header | **401** "Authentication token missing" |
+| ☐ | No token | Request `/profile` with no `Authorization` header (see snippet below) | **401** "Authentication token missing" |
 | ☐ | Malformed header | `Authorization: <token>` (no `Bearer `) | **401** "Authentication token missing" |
 | ☐ | Invalid token | `Authorization: Bearer abc.def.ghi` | **401** "Invalid token" |
 | ☐ | Tampered token | Real token with one character changed | **401** "Invalid token" |
-| ☐ | Expired token | Set `JWT_EXPIRES_IN` in `src/config/jwt.ts` to `"10s"`, log in, wait 15s (then set it back to `"1h"`) | **401** "Token expired, please log in again" |
-| ☐ | Valid token | Log in, click **View Profile** | **200**, username and email shown |
+| ☐ | Expired token | Set `JWT_EXPIRES_IN` in `src/config/jwt.ts` to `"10s"`, log in, wait 15s, reload the page (then set it back to `"1h"`) | **401**, login tab shows "Token expired, please log in again" |
+| ☐ | Valid token | Log in, or reload the page while logged in | **200**, profile card shows username and email |
 
 Console snippet for header tests:
 

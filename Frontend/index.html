@@ -9,96 +9,116 @@
 
 <body>
 
-    <div class="container" id="mainContainer">
+    <main class="page">
 
-        <h1>My Auth App</h1>
-
-        <button class="skip-button" id="skipButton">
-            Skip Login / Registration
-        </button>
-
-        <div class="form-container">
-
-            <h2>Register</h2>
-
-            <input type="text" id="registerUsername" placeholder="Username">
-            <input type="email" id="registerEmail" placeholder="Email">
-            <input type="password" id="registerPassword" placeholder="Password">
-
-            <button id="registerButton">Register</button>
-
-            <p id="registerMessage"></p>
-
-        </div>
-
-        <div class="form-container">
-
-            <h2>Login</h2>
-
-            <input type="email" id="loginEmail" placeholder="Email">
-            <input type="password" id="loginPassword" placeholder="Password">
-
-            <button id="loginButton">Login</button>
-
-            <p id="loginMessage"></p>
-
-        </div>
-
-        <div class="form-container">
-
-            <h2>Profile</h2>
-
-            <button id="profileButton">View Profile</button>
-            <button id="logoutButton">Logout</button>
-
-            <p id="profileMessage"></p>
-
-        </div>
-
-    </div>
+        <header class="brand">
+            <div class="brand-logo" aria-hidden="true">A</div>
+            <h1>My Auth App</h1>
+            <p class="brand-subtitle">Sign in to your account or leave us a request</p>
+        </header>
 
 
-    <!-- REQUEST SCREEN -->
+        <!-- AUTH VIEW: login / register -->
 
-    <div class="request-screen" id="requestScreen">
+        <section class="card" id="authView">
 
-        <div class="request-box">
+            <div class="tabs" role="tablist">
+                <button type="button" class="tab active" id="loginTab" role="tab">Log in</button>
+                <button type="button" class="tab" id="registerTab" role="tab">Create account</button>
+            </div>
 
-            <h1>Leave a Request</h1>
+            <form id="loginForm" class="form" novalidate>
+                <label for="loginEmail">Email</label>
+                <input type="email" id="loginEmail" placeholder="you@example.com" autocomplete="email">
 
-            <p>
-                Tell us what you need help with and someone will
-                contact you shortly.
-            </p>
+                <label for="loginPassword">Password</label>
+                <input type="password" id="loginPassword" placeholder="Your password" autocomplete="current-password">
 
-            <textarea
-                id="requestMessage"
-                placeholder="Describe your request..."
-                rows="6">
-            </textarea>
+                <button type="submit" class="button primary" id="loginButton">Log in</button>
 
-            <p class="error-message" id="requestError"></p>
+                <p class="message" id="loginMessage" role="status"></p>
+            </form>
 
-            <input
-                type="tel"
-                id="requestPhone"
-                placeholder="Phone number">
+            <form id="registerForm" class="form" novalidate hidden>
+                <label for="registerUsername">Username</label>
+                <input type="text" id="registerUsername" placeholder="At least 3 characters" autocomplete="username">
 
-            <p class="error-message" id="phoneError"></p>
+                <label for="registerEmail">Email</label>
+                <input type="email" id="registerEmail" placeholder="you@example.com" autocomplete="email">
 
-            <button id="submitRequestButton">
-                Submit Request
+                <label for="registerPassword">Password</label>
+                <input type="password" id="registerPassword" placeholder="Create a password" autocomplete="new-password">
+                <p class="hint">At least 8 characters, including a letter and a number.</p>
+
+                <button type="submit" class="button primary" id="registerButton">Create account</button>
+
+                <p class="message" id="registerMessage" role="status"></p>
+            </form>
+
+            <div class="divider"><span>or</span></div>
+
+            <button type="button" class="button secondary" id="skipButton">
+                Continue as guest
             </button>
 
-            <button class="back-button" id="backButton">
-                Back
-            </button>
+        </section>
 
-            <div id="requestSuccess"></div>
 
-        </div>
+        <!-- PROFILE VIEW: shown when logged in -->
 
-    </div>
+        <section class="card" id="profileView" hidden>
+
+            <div class="profile">
+                <div class="avatar" id="profileAvatar" aria-hidden="true"></div>
+                <div>
+                    <p class="profile-greeting">Welcome back,</p>
+                    <h2 class="profile-name" id="profileName"></h2>
+                    <p class="profile-email" id="profileEmail"></p>
+                </div>
+            </div>
+
+            <p class="message success">You are logged in with a valid token.</p>
+
+            <button type="button" class="button secondary" id="logoutButton">Log out</button>
+
+        </section>
+
+
+        <!-- GUEST VIEW: leave a request without an account -->
+
+        <section class="card" id="guestView" hidden>
+
+            <div id="guestFormContainer">
+                <h2 class="card-title">Leave a request</h2>
+                <p class="card-text">
+                    Tell us what you need help with and someone will contact you shortly.
+                </p>
+
+                <form id="requestForm" class="form" novalidate>
+                    <label for="requestMessage">Your request</label>
+                    <textarea id="requestMessage" rows="5" placeholder="Describe what you need help with..."></textarea>
+                    <p class="field-error" id="requestError"></p>
+
+                    <label for="requestPhone">Phone number</label>
+                    <input type="tel" id="requestPhone" placeholder="01XXXXXXXXX" inputmode="numeric" maxlength="11" autocomplete="tel">
+                    <p class="field-error" id="phoneError"></p>
+
+                    <button type="submit" class="button primary" id="submitRequestButton">Submit request</button>
+                </form>
+            </div>
+
+            <div class="success-state" id="requestSuccess" hidden>
+                <div class="success-icon" aria-hidden="true">✓</div>
+                <h2 class="card-title">Thank you!</h2>
+                <p class="card-text">Your request has been received.</p>
+                <p class="card-text">Someone will be in contact with you shortly.</p>
+            </div>
+
+            <button type="button" class="button link" id="backButton">← Back to login</button>
+
+        </section>
+
+    </main>
 
 
     <script src="script.js"></script>
