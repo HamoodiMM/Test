@@ -1,17 +1,29 @@
 {
-  "name": "test",
+  "name": "express-mongo-auth",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "private": true,
+  "description": "Express + TypeScript REST API with MongoDB, JWT authentication, Zod validation and a guest request form",
+  "main": "dist/server.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "express",
+    "typescript",
+    "mongodb",
+    "mongoose",
+    "jwt",
+    "authentication",
+    "rest-api"
+  ],
+  "author": "Mohamed Mahmoud",
   "license": "ISC",
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "bcrypt": "^6.0.0",
     "dotenv": "^18.0.4",
