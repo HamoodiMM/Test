@@ -38,7 +38,45 @@ async function login() {
 
     const data = await response.json();
 
+    if (response.ok) {
+        // Keep the token so later requests can prove who we are
+        localStorage.setItem("token", data.token);
+    }
+
     document.getElementById("loginMessage").textContent = data.message;
+}
+
+
+async function loadProfile() {
+    const profileMessage = document.getElementById("profileMessage");
+    const token = localStorage.getItem("token");
+
+    if (!token) {
+        profileMessage.textContent = "You are not logged in.";
+        return;
+    }
+
+    const response = await fetch("/profile", {
+        headers: {
+            "Authorization": "Bearer " + token
+        }
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+        profileMessage.textContent = data.message;
+        return;
+    }
+
+    profileMessage.textContent =
+        "Logged in as " + data.user.username + " (" + data.user.email + ")";
+}
+
+
+function logout() {
+    localStorage.removeItem("token");
+    document.getElementById("profileMessage").textContent = "Logged out.";
 }
 
 function showRequestForm() {

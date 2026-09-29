@@ -3,7 +3,10 @@ import path from "path";
 import express from "express";
 import bcrypt from "bcrypt";
 import mongoose from "mongoose";
+import jwt from "jsonwebtoken";
 import { connectDB } from "./config/db";
+import { getJwtSecret, JWT_EXPIRES_IN } from "./config/jwt";
+import { requireAuth } from "./middleware/auth";
 import { User } from "./models/User";
 
 const app = express();
@@ -35,10 +38,33 @@ app.get("/about", (req, res) => {
     res.send("Test Test.");
 });
 
+// Protected: only logged-in users can list users.
 // Password is excluded automatically because of `select: false` in the User schema
-app.get("/users", async (req, res) => {
+app.get("/users", requireAuth, async (req, res) => {
     const users = await User.find();
     res.json(users);
+});
+
+// Protected: returns the account of whoever owns the token
+app.get("/profile", requireAuth, async (req, res) => {
+    if (!req.user) {
+        return res.status(401).json({ message: "Not authenticated" });
+    }
+
+    const user = await User.findById(req.user.userId);
+
+    // Token is valid, but the account was deleted after it was issued
+    if (!user) {
+        return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json({
+        user: {
+            id: user._id,
+            username: user.username,
+            email: user.email
+        }
+    });
 });
 
 app.post("/register", async (req, res) => {
@@ -141,8 +167,15 @@ app.post("/login", async (req, res) => {
         });
     }
 
+    const token = jwt.sign(
+        { userId: user._id.toString() },
+        getJwtSecret(),
+        { expiresIn: JWT_EXPIRES_IN }
+    );
+
     res.json({
         message: "Login successful",
+        token: token,
         user: {
             id: user._id,
             username: user.username,
@@ -206,6 +239,7 @@ app.post("/requests", (req, res) => {
 
 async function startServer(): Promise<void> {
     try {
+        getJwtSecret(); // fail fast if JWT_SECRET is missing
         await connectDB();
 
         app.listen(PORT, () => {
