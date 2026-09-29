@@ -1,4 +1,5 @@
 import { Schema, model } from "mongoose";
+import { EGYPT_PHONE_REGEX } from "../validation/guestRequest.schemas";
 
 export interface IGuestRequest {
     message: string;
@@ -18,7 +19,7 @@ const guestRequestSchema = new Schema<IGuestRequest>(
             type: String,
             required: [true, "Phone number is required"],
             trim: true,
-            match: [/^01[0125][0-9]{8}$/, "Please provide a valid Egyptian phone number"]
+            match: [EGYPT_PHONE_REGEX,"Please provide a valid Egyptian phone number"]
         }
     },
     { timestamps: true }

@@ -9,12 +9,12 @@ import { getJwtSecret, JWT_EXPIRES_IN } from "./config/jwt";
 import { requireAuth } from "./middleware/auth";
 import { User } from "./models/User";
 import { GuestRequest } from "./models/GuestRequest";
+import { registerSchema, loginSchema } from "./validation/auth.schemas";
+import { guestRequestSchema } from "./validation/guestRequest.schemas";
 
 const app = express();
 
 const PORT = Number(process.env.PORT) || 3000;
-
-const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "../Frontend")));
@@ -61,37 +61,18 @@ app.get("/profile", requireAuth, async (req, res) => {
 });
 
 app.post("/register", async (req, res) => {
-    const { username, email, password } = req.body;
+    // Runtime validation: req.body comes from the client and can contain anything
+    const result = registerSchema.safeParse(req.body);
 
-    if (
-        typeof username !== "string" ||
-        typeof email !== "string" ||
-        typeof password !== "string" ||
-        !username.trim() ||
-        !email.trim() ||
-        !password
-    ) {
-        return res.status(400).json({
-            message: "Username, email and password are required"
-        });
+    if (!result.success) {
+        return res.status(400).json({ message: result.error.issues[0].message });
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
-
-    if (!emailRegex.test(normalizedEmail)) {
-        return res.status(400).json({
-            message: "Please provide a valid email address"
-        });
-    }
-
-    if (password.length < 6) {
-        return res.status(400).json({
-            message: "Password must be at least 6 characters"
-        });
-    }
+    // result.data is typed as RegisterInput, already trimmed and lowercased
+    const { username, email, password } = result.data;
 
     try {
-        const existingUser = await User.findOne({ email: normalizedEmail });
+        const existingUser = await User.findOne({ email: email });
 
         if (existingUser) {
             return res.status(409).json({
@@ -103,7 +84,7 @@ app.post("/register", async (req, res) => {
 
         const newUser = await User.create({
             username: username,
-            email: normalizedEmail,
+            email: email,
             password: hashedPassword
         });
 
@@ -135,16 +116,16 @@ app.post("/register", async (req, res) => {
 });
 
 app.post("/login", async (req, res) => {
-    const { email, password } = req.body;
+    const result = loginSchema.safeParse(req.body);
 
-    if (typeof email !== "string" || typeof password !== "string" || !email.trim() || !password) {
-        return res.status(400).json({
-            message: "Email and password are required"
-        });
+    if (!result.success) {
+        return res.status(400).json({ message: result.error.issues[0].message });
     }
 
+    const { email, password } = result.data;
+
     // `+password` re-includes the field that the schema hides by default
-    const user = await User.findOne({ email: email.trim().toLowerCase() }).select("+password");
+    const user = await User.findOne({ email: email }).select("+password");
 
     if (!user) {
         return res.status(401).json({
@@ -179,44 +160,17 @@ app.post("/login", async (req, res) => {
 
 app.post("/requests", async (req, res) => {
 
-    const { message, phone } = req.body;
+    // Validate message length and Egyptian phone format
+    const result = guestRequestSchema.safeParse(req.body);
 
-
-    // Check that both fields exist and are strings
-
-    if (typeof message !== "string" || typeof phone !== "string" || !message || !phone) {
-        return res.status(400).json({
-            message: "Request and phone number are required"
-        });
+    if (!result.success) {
+        return res.status(400).json({ message: result.error.issues[0].message });
     }
 
 
-    // Validate request length
+    // Save request to MongoDB (values are already trimmed by the schema)
 
-    if (message.trim().length < 10) {
-        return res.status(400).json({
-            message: "Request must be at least 10 characters"
-        });
-    }
-
-
-    // Validate Egyptian phone number
-
-    const phoneRegex = /^(01)[0125][0-9]{8}$/;
-
-    if (!phoneRegex.test(phone)) {
-        return res.status(400).json({
-            message: "Please provide a valid Egyptian phone number"
-        });
-    }
-
-
-    // Save request to MongoDB
-
-    await GuestRequest.create({
-        message: message.trim(),
-        phone: phone.trim()
-    });
+    await GuestRequest.create(result.data);
 
 
     // Success
