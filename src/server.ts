@@ -8,20 +8,13 @@ import { connectDB } from "./config/db";
 import { getJwtSecret, JWT_EXPIRES_IN } from "./config/jwt";
 import { requireAuth } from "./middleware/auth";
 import { User } from "./models/User";
+import { GuestRequest } from "./models/GuestRequest";
 
 const app = express();
 
 const PORT = Number(process.env.PORT) || 3000;
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-interface Request {
-    id: number;
-    message: string;
-    phone: string;
-}
-
-const requests: Request[] = [];
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "../Frontend")));
@@ -184,14 +177,14 @@ app.post("/login", async (req, res) => {
     });
 });
 
-app.post("/requests", (req, res) => {
+app.post("/requests", async (req, res) => {
 
     const { message, phone } = req.body;
 
 
-    // Check that both fields exist
+    // Check that both fields exist and are strings
 
-    if (!message || !phone) {
+    if (typeof message !== "string" || typeof phone !== "string" || !message || !phone) {
         return res.status(400).json({
             message: "Request and phone number are required"
         });
@@ -218,16 +211,12 @@ app.post("/requests", (req, res) => {
     }
 
 
-    // Create request
+    // Save request to MongoDB
 
-    const newRequest: Request = {
-        id: requests.length + 1,
+    await GuestRequest.create({
         message: message.trim(),
-        phone: phone
-    };
-
-
-    requests.push(newRequest);
+        phone: phone.trim()
+    });
 
 
     // Success
