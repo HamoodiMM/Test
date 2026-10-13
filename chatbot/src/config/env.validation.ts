@@ -10,6 +10,9 @@ const envSchema = z.object({
     .min(1, 'GEMINI_API_KEY is required'),
 
   GEMINI_MODEL: z.string().min(1).default('gemini-3.5-flash'),
+
+  // How long to wait for Gemini before giving up
+  GEMINI_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
 });
 
 // The TypeScript type of our validated config, generated from the schema
