@@ -79,7 +79,54 @@
 
             <p class="message success">You are logged in with a valid token.</p>
 
-            <button type="button" class="button secondary" id="logoutButton">Log out</button>
+            <button type="button" class="button primary" id="openChatButton">✦ Open AI assistant</button>
+            <button type="button" class="button secondary spaced" id="logoutButton">Log out</button>
+
+        </section>
+
+
+        <!-- CHAT VIEW: AI assistant powered by the NestJS chatbot API -->
+
+        <section class="card chat-card" id="chatView" hidden>
+
+            <header class="chat-header">
+                <button type="button" class="icon-button" id="chatBackButton" aria-label="Back to profile">←</button>
+
+                <div class="chat-title">
+                    <div class="chat-avatar" aria-hidden="true">✦</div>
+                    <div>
+                        <h2>AI Assistant</h2>
+                        <p id="chatStatus">Powered by Gemini</p>
+                    </div>
+                </div>
+
+                <button type="button" class="button small secondary" id="newChatButton">New chat</button>
+            </header>
+
+            <div class="chat-messages" id="chatMessages" aria-live="polite">
+
+                <div class="chat-empty" id="chatEmpty">
+                    <div class="chat-empty-icon" aria-hidden="true">✦</div>
+                    <h3>How can I help?</h3>
+                    <p>Ask me anything about backend development, or try one of these:</p>
+                    <div class="suggestions">
+                        <button type="button" class="suggestion">Explain JWT in simple terms</button>
+                        <button type="button" class="suggestion">What is the difference between SQL and MongoDB?</button>
+                        <button type="button" class="suggestion">What does middleware do in Express?</button>
+                    </div>
+                </div>
+
+            </div>
+
+            <form class="chat-input" id="chatForm">
+                <textarea id="chatInput" rows="1" maxlength="2000" placeholder="Message the assistant..." aria-label="Message"></textarea>
+                <button type="submit" class="send-button" id="chatSendButton" aria-label="Send">➤</button>
+            </form>
+
+            <p class="chat-footer">
+                <span id="chatTokens">0 tokens used in this chat</span>
+                <span class="chat-hint">Enter to send · Shift+Enter for a new line</span>
+            </p>
 
         </section>
 
