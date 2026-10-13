@@ -86,3 +86,28 @@ fetch("/profile", { headers: { Authorization: "Bearer abc.def.ghi" } }).then(r =
 | ☐ | Data survives a server restart | Log in again after restarting — still works |
 | ☐ | Security headers present (F12 → Network → any request → Headers) | `Content-Security-Policy` present, no `X-Powered-By` |
 | ☐ | All frontend buttons work, no red CSP errors in the console | ✔ |
+
+## AI chatbot (NestJS, port 3001)
+
+Start both servers (`npm run dev` and `cd chatbot && npm run start:dev`), log in, then click **Open AI assistant**.
+Automated tests: `cd chatbot && npm test && npm run test:e2e`.
+
+| ☐ | Case | How | Expected |
+|---|---|---|---|
+| ☐ | Health check | Open http://localhost:3001/health | **200** `{"status":"ok","database":"connected",...}` |
+| ☐ | No token | Console: `fetch("http://localhost:3001/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:'{"message":"hi"}'}).then(r=>r.json()).then(console.log)` | **401** "Authentication token missing" |
+| ☐ | Valid message | Send a message in the chat | **200**, reply plus tokens and ≈ cost under the bubble |
+| ☐ | Personal greeting | Ask "What is my name?" | The bot uses your username (from the JWT) |
+| ☐ | Memory | Say "my favourite colour is blue", then ask what it is | Bot remembers; **in** tokens grow with each message |
+| ☐ | Saved chats | Click **+ New chat**, then reopen the first chat from the sidebar, then reload the page | The conversation is still there |
+| ☐ | Delete chat | Click ✕ on a chat and confirm | Removed from the sidebar (**204**) |
+| ☐ | Empty message | Send only spaces (or `{}` from the console) | **400** "Message is required" |
+| ☐ | Too long | 2001+ characters | **400** "Message must be at most 2000 characters" |
+| ☐ | Unknown field | Body `{"message":"hi","admin":true}` | **400** "property admin should not exist" |
+| ☐ | Invalid conversation id | `GET /conversations/abc` with your token | **400** "Invalid conversation id" |
+| ☐ | Someone else's chat | Another user's conversation id | **404** "Conversation not found" |
+| ☐ | Rate limit | Send 4 messages within 10 seconds | **429** "Too many messages, please slow down..." |
+| ☐ | Gemini daily quota used up | Happens after the free daily requests for the model | **503** "free daily limit has been reached" |
+| ☐ | Chatbot server stopped | Stop it and send a message | "Could not reach the AI assistant..." |
+| ☐ | Expired token | Wait for the 1h expiry (or use an old token), send a message | Back to login with "Token expired, please log in again" |
+| ☐ | API docs | Open http://localhost:3001/docs, **Authorize** with your token, try `GET /conversations` | **200**, your conversations |
