@@ -6,17 +6,28 @@ describe('AppController', () => {
   let appController: AppController;
 
   beforeEach(async () => {
+    // A testing module is a mini Nest app. We replace AppService with a fake
+    // (useValue) so the test doesn't need a real database connection.
     const app: TestingModule = await Test.createTestingModule({
       controllers: [AppController],
-      providers: [AppService],
+      providers: [
+        {
+          provide: AppService,
+          useValue: {
+            getHealth: () => ({ status: 'ok', database: 'connected', uptimeSeconds: 5 }),
+          },
+        },
+      ],
     }).compile();
 
     appController = app.get<AppController>(AppController);
   });
 
-  describe('root', () => {
-    it('should return "Hello World!"', () => {
-      expect(appController.getHello()).toBe('Hello World!');
+  it('GET /health returns the health status', () => {
+    expect(appController.getHealth()).toEqual({
+      status: 'ok',
+      database: 'connected',
+      uptimeSeconds: 5,
     });
   });
 });
