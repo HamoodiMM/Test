@@ -21,6 +21,15 @@ async function bootstrap() {
   const config = app.get<ConfigService<Env, true>>(ConfigService);
   const port = config.get('PORT', { infer: true });
 
+  // CORS: browsers block a page on one origin (localhost:3000) from reading responses
+  // from another (localhost:3001) unless that server explicitly allows it.
+  // We allow exactly one origin: our own frontend. Not "*".
+  app.enableCors({
+    origin: config.get('CORS_ORIGIN', { infer: true }),
+    methods: ['POST'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  });
+
   await app.listen(port);
 
   // Log which model we use, but never the API key

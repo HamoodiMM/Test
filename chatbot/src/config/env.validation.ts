@@ -11,6 +11,9 @@ const envSchema = z.object({
 
   GEMINI_MODEL: z.string().min(1).default('gemini-3.5-flash'),
 
+  // The website allowed to call this API from a browser (the Express frontend)
+  CORS_ORIGIN: z.url({ error: 'CORS_ORIGIN must be a URL' }).default('http://localhost:3000'),
+
   // How long to wait for Gemini before giving up
   GEMINI_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
 });
