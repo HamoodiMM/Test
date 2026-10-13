@@ -9,7 +9,7 @@ const envSchema = z.object({
     .string({ error: 'GEMINI_API_KEY is required' })
     .min(1, 'GEMINI_API_KEY is required'),
 
-  GEMINI_MODEL: z.string().min(1).default('gemini-flash-latest'),
+  GEMINI_MODEL: z.string().min(1).default('gemini-3.5-flash'),
 });
 
 // The TypeScript type of our validated config, generated from the schema
