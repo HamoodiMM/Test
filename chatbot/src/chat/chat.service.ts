@@ -9,8 +9,9 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiError, GoogleGenAI } from '@google/genai';
-import type { GenerateContentResponse } from '@google/genai';
+import type { Content, GenerateContentResponse } from '@google/genai';
 import type { Env } from '../config/env.validation.js';
+import type { ChatHistoryItemDto } from './dto/chat-message.dto.js';
 
 // How many tokens one request used. Free-tier limits and pricing are counted in tokens.
 export interface TokenUsage {
@@ -48,14 +49,23 @@ export class ChatService {
     this.model = config.get('GEMINI_MODEL', { infer: true });
   }
 
-  async sendMessage(message: string): Promise<ChatReply> {
+  async sendMessage(message: string, history: ChatHistoryItemDto[] = []): Promise<ChatReply> {
+    this.assertValidHistory(history);
+
+    // The Gemini API is STATELESS: it remembers nothing between requests.
+    // To have a conversation, we send the whole history + the new message every time.
+    const contents: Content[] = [
+      ...history.map((item) => ({ role: item.role, parts: [{ text: item.text }] })),
+      { role: 'user', parts: [{ text: message }] },
+    ];
+
     let response: GenerateContentResponse;
 
     try {
       // One HTTPS request to Google's Gemini API
       response = await this.ai.models.generateContent({
         model: this.model,
-        contents: message,
+        contents: contents,
         config: {
           systemInstruction: SYSTEM_INSTRUCTION,
         },
@@ -87,6 +97,24 @@ export class ChatService {
         totalTokens: usage?.totalTokenCount ?? 0,
       },
     };
+  }
+
+  // A conversation must alternate: user, model, user, model... (starting with the user).
+  // Without this check, a malformed history would make Gemini fail with a confusing error.
+  private assertValidHistory(history: ChatHistoryItemDto[]): void {
+    history.forEach((item, index) => {
+      const expectedRole = index % 2 === 0 ? 'user' : 'model';
+
+      if (item.role !== expectedRole) {
+        throw new BadRequestException(
+          'History must alternate between "user" and "model", starting with "user"',
+        );
+      }
+    });
+
+    if (history.length % 2 !== 0) {
+      throw new BadRequestException('History must end with a "model" message');
+    }
   }
 
   // Translate a Gemini failure into an HTTP error for OUR client.
