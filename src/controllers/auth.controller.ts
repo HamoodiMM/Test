@@ -88,8 +88,10 @@ export async function login(req: Request, res: Response): Promise<void> {
         return;
     }
 
+    // The payload is readable by anyone (signed, not encrypted), so only non-secret data.
+    // The NestJS chatbot reads `username` from here to address the user by name.
     const token = jwt.sign(
-        { userId: user._id.toString() },
+        { userId: user._id.toString(), username: user.username },
         getJwtSecret(),
         { expiresIn: JWT_EXPIRES_IN }
     );
