@@ -683,3 +683,167 @@ textarea.invalid {
         max-width: 92%;
     }
 }
+
+
+/* ---------- Chat sidebar (saved conversations) ---------- */
+
+.page.wide {
+    max-width: 1040px;
+}
+
+.chat-card {
+    flex-direction: row;
+    position: relative;
+}
+
+.chat-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.chat-sidebar {
+    width: 260px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 12px;
+    border-right: 1px solid var(--border);
+    background: var(--bg);
+}
+
+.sidebar-label {
+    margin: 18px 8px 8px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+}
+
+.sidebar-empty {
+    margin: 4px 8px;
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.conversation-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    flex: 1;
+    overflow-y: auto;
+}
+
+.conversation-item {
+    display: flex;
+    align-items: center;
+    border-radius: 8px;
+}
+
+.conversation-item:hover,
+.conversation-item.active {
+    background: var(--primary-soft);
+}
+
+.conversation-open {
+    flex: 1;
+    min-width: 0;
+    padding: 9px 10px;
+    border: none;
+    background: none;
+    color: var(--text);
+    font: inherit;
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.conversation-open span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.conversation-open small {
+    display: block;
+    margin-top: 2px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.conversation-delete {
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    margin-right: 4px;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    opacity: 0;
+}
+
+.conversation-item:hover .conversation-delete,
+.conversation-item.active .conversation-delete {
+    opacity: 1;
+}
+
+.conversation-delete:hover {
+    background: var(--error-bg);
+    color: var(--error-text);
+}
+
+.chat-sidebar .button.link {
+    margin-top: 8px;
+}
+
+/* Copy button under AI replies */
+.msg-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.copy-button {
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.copy-button:hover {
+    color: var(--primary);
+}
+
+.sidebar-toggle {
+    display: none;
+}
+
+/* Phones: the sidebar slides over the chat */
+@media (max-width: 760px) {
+    .sidebar-toggle {
+        display: block;
+    }
+
+    .chat-sidebar {
+        position: absolute;
+        inset: 0 auto 0 0;
+        z-index: 2;
+        width: 82%;
+        max-width: 300px;
+        transform: translateX(-100%);
+        transition: transform 0.2s ease;
+        box-shadow: var(--shadow);
+    }
+
+    .chat-card.sidebar-open .chat-sidebar {
+        transform: none;
+    }
+}

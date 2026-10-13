@@ -171,6 +171,7 @@ async function loadProfile() {
         $("profileName").textContent = data.user.username;
         $("profileEmail").textContent = data.user.email;
         $("profileAvatar").textContent = data.user.username.charAt(0).toUpperCase();
+        currentUsername = data.user.username;
 
         showView("profile");
     } catch (error) {
@@ -182,7 +183,7 @@ async function loadProfile() {
 
 function logout() {
     localStorage.removeItem("token");
-    newChat(); // don't keep the conversation around for the next person
+    resetChat(); // don't leave the conversation on screen for the next person
 
     showView("auth");
     showTab("login");
@@ -272,39 +273,205 @@ async function submitRequest(event) {
 // A different origin than this page (port 3001 vs 3000), so CORS applies
 const CHATBOT_URL = "http://localhost:3001";
 
-// The server limits history to 20 messages (10 exchanges)
-const MAX_HISTORY_MESSAGES = 20;
-
-// The conversation so far: [{ role: "user" | "model", text: "..." }, ...]
-// The Gemini API is stateless, so we send this with every message.
-let chatHistory = [];
-let chatTokensUsed = 0;
+// The chat currently on screen (null = a new chat that isn't saved yet).
+// Conversations are stored in MongoDB by the chatbot API, so they survive
+// "New chat", page reloads and server restarts.
+let currentConversationId = null;
+let currentUsername = "";
 let chatBusy = false;
 
 
-function openChat() {
+// fetch() to the chatbot API, always sending our JWT.
+// The chatbot verifies the same token the Express app issued at login.
+async function chatbotRequest(path, options) {
+    const response = await fetch(CHATBOT_URL + path, {
+        method: (options && options.method) || "GET",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + localStorage.getItem("token")
+        },
+        body: options && options.body ? JSON.stringify(options.body) : undefined
+    });
+
+    // 204 No Content (after a delete) has no body to read
+    const data = response.status === 204 ? null : await response.json();
+
+    // Token missing, invalid or expired: send the user back to the login screen
+    if (response.status === 401) {
+        endSession(errorText(data));
+    }
+
+    return { ok: response.ok, status: response.status, data: data };
+}
+
+
+function endSession(message) {
+    localStorage.removeItem("token");
+    resetChat();
+    showView("auth");
+    showTab("login");
+    showMessage($("loginMessage"), message || "Please log in again.", "error");
+}
+
+
+// Tokens → dollars. Tiny amounts need more decimals to be visible.
+function formatCost(usd) {
+    if (!usd) {
+        return "$0";
+    }
+    return "$" + (usd < 0.01 ? usd.toFixed(5) : usd.toFixed(4));
+}
+
+
+function updateChatFooter(tokens, costUsd) {
+    if (!currentConversationId) {
+        $("chatTokens").textContent = "New chat";
+        return;
+    }
+
+    $("chatTokens").textContent =
+        tokens.toLocaleString() + " tokens · ≈ " + formatCost(costUsd) +
+        " at paid-tier prices (free tier: $0)";
+}
+
+
+async function openChat() {
     showView("chat");
+    $("chatGreeting").textContent = currentUsername
+        ? "How can I help, " + currentUsername + "?"
+        : "How can I help?";
     $("chatInput").focus();
+    await loadConversations();
+}
+
+
+// Clear the screen for a new, unsaved chat (saved chats stay in the sidebar)
+function resetChat() {
+    currentConversationId = null;
+
+    $("chatMessages").querySelectorAll(".msg").forEach((el) => el.remove());
+    $("chatEmpty").hidden = false;
+    $("chatTitle").textContent = "AI Assistant";
+    updateChatFooter(0, 0);
+    highlightActiveConversation();
 }
 
 
 function newChat() {
-    chatHistory = [];
-    chatTokensUsed = 0;
-    updateTokenCounter();
-
-    // Remove all messages but keep the welcome screen
-    $("chatMessages").querySelectorAll(".msg").forEach((el) => el.remove());
-    $("chatEmpty").hidden = false;
+    resetChat();
+    $("chatView").classList.remove("sidebar-open");
     $("chatInput").focus();
 }
 
 
-function updateTokenCounter() {
-    $("chatTokens").textContent =
-        chatTokensUsed.toLocaleString() + " tokens used in this chat";
+// ----- Sidebar: list, open and delete saved conversations -----
+
+async function loadConversations() {
+    try {
+        const result = await chatbotRequest("/conversations");
+
+        if (!result.ok) {
+            return;
+        }
+
+        const list = $("conversationList");
+        list.innerHTML = "";
+        $("conversationEmpty").textContent = "No saved chats yet.";
+        $("conversationEmpty").hidden = result.data.length > 0;
+
+        result.data.forEach((conversation) => {
+            const item = document.createElement("li");
+            item.className = "conversation-item";
+            item.dataset.id = conversation.id;
+
+            const openButton = document.createElement("button");
+            openButton.type = "button";
+            openButton.className = "conversation-open";
+
+            const title = document.createElement("span");
+            title.textContent = conversation.title; // textContent: titles are user input
+
+            const details = document.createElement("small");
+            const questions = conversation.messageCount / 2; // each exchange = question + answer
+            details.textContent =
+                questions + (questions === 1 ? " message" : " messages") + " · " +
+                new Date(conversation.updatedAt).toLocaleDateString();
+
+            openButton.append(title, details);
+            openButton.addEventListener("click", () => openConversation(conversation.id));
+
+            const deleteButton = document.createElement("button");
+            deleteButton.type = "button";
+            deleteButton.className = "conversation-delete";
+            deleteButton.textContent = "✕";
+            deleteButton.setAttribute("aria-label", "Delete chat");
+            deleteButton.addEventListener("click", () => deleteConversation(conversation.id));
+
+            item.append(openButton, deleteButton);
+            list.appendChild(item);
+        });
+
+        highlightActiveConversation();
+    } catch (error) {
+        $("conversationEmpty").hidden = false;
+        $("conversationEmpty").textContent = "Could not load chats. Is the chatbot server running?";
+    }
 }
 
+
+function highlightActiveConversation() {
+    document.querySelectorAll(".conversation-item").forEach((item) => {
+        item.classList.toggle("active", item.dataset.id === currentConversationId);
+    });
+}
+
+
+async function openConversation(id) {
+    try {
+        const result = await chatbotRequest("/conversations/" + id);
+
+        if (!result.ok) {
+            addMessage("error", errorText(result.data));
+            return;
+        }
+
+        resetChat();
+        currentConversationId = id;
+        $("chatTitle").textContent = result.data.title;
+
+        result.data.messages.forEach((message) => {
+            if (message.role === "user") {
+                addMessage("user", message.text);
+            } else {
+                addMessage("bot", message.text, message.tokens + " tokens · ≈ " + formatCost(message.costUsd));
+            }
+        });
+
+        updateChatFooter(result.data.totalTokens, result.data.totalCostUsd);
+        highlightActiveConversation();
+        $("chatView").classList.remove("sidebar-open");
+    } catch (error) {
+        addMessage("error", "Could not load this chat. Is the chatbot server running?");
+    }
+}
+
+
+async function deleteConversation(id) {
+    if (!confirm("Delete this chat? This cannot be undone.")) {
+        return;
+    }
+
+    const result = await chatbotRequest("/conversations/" + id, { method: "DELETE" });
+
+    if (result.ok && id === currentConversationId) {
+        resetChat();
+    }
+
+    await loadConversations();
+}
+
+
+// ----- Messages -----
 
 // Make text safe to put inside HTML: "<script>" becomes harmless text
 function escapeHtml(text) {
@@ -360,11 +527,31 @@ function addMessage(type, text, meta) {
 
     message.appendChild(bubble);
 
-    if (meta) {
-        const metaLine = document.createElement("div");
-        metaLine.className = "msg-meta";
-        metaLine.textContent = meta;
-        message.appendChild(metaLine);
+    if (type === "bot" || meta) {
+        const actions = document.createElement("div");
+        actions.className = "msg-meta msg-actions";
+
+        if (meta) {
+            const metaText = document.createElement("span");
+            metaText.textContent = meta;
+            actions.appendChild(metaText);
+        }
+
+        // Copy the AI's answer to the clipboard
+        if (type === "bot") {
+            const copyButton = document.createElement("button");
+            copyButton.type = "button";
+            copyButton.className = "copy-button";
+            copyButton.textContent = "Copy";
+            copyButton.addEventListener("click", async () => {
+                await navigator.clipboard.writeText(text);
+                copyButton.textContent = "Copied!";
+                setTimeout(() => (copyButton.textContent = "Copy"), 1500);
+            });
+            actions.appendChild(copyButton);
+        }
+
+        message.appendChild(actions);
     }
 
     $("chatMessages").appendChild(message);
@@ -376,10 +563,10 @@ function addMessage(type, text, meta) {
 
 // Nest validation errors come back as an array of messages; others as a string
 function errorText(data) {
-    if (Array.isArray(data.message)) {
+    if (data && Array.isArray(data.message)) {
         return data.message.join(" ");
     }
-    return data.message || "Something went wrong, please try again.";
+    return (data && data.message) || "Something went wrong, please try again.";
 }
 
 
@@ -400,43 +587,43 @@ async function sendChatMessage(text) {
     const startTime = performance.now();
 
     try {
-        const response = await fetch(CHATBOT_URL + "/chat", {
+        // The server loads this conversation's history from MongoDB and saves the new
+        // exchange, so we only send the new message and which chat it belongs to.
+        const result = await chatbotRequest("/chat", {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
+            body: {
                 message: message,
-                history: chatHistory.slice(-MAX_HISTORY_MESSAGES)
-            })
+                conversationId: currentConversationId || undefined
+            }
         });
 
-        const data = await response.json();
         typing.remove();
 
-        if (!response.ok) {
-            addMessage("error", errorText(data));
+        if (!result.ok) {
+            addMessage("error", errorText(result.data));
             return;
         }
 
-        // Remember this exchange so the next message has context
-        chatHistory.push({ role: "user", text: message });
-        chatHistory.push({ role: "model", text: data.reply });
-
-        const seconds = ((performance.now() - startTime) / 1000).toFixed(1);
+        const data = result.data;
         const usage = data.usage;
+        const seconds = ((performance.now() - startTime) / 1000).toFixed(1);
 
         addMessage(
             "bot",
             data.reply,
             usage.totalTokens + " tokens (in " + usage.inputTokens +
             " · thinking " + usage.thinkingTokens +
-            " · out " + usage.outputTokens + ") · " + seconds + "s"
+            " · out " + usage.outputTokens + ") · ≈ " + formatCost(usage.costUsd) +
+            " · " + seconds + "s"
         );
 
-        chatTokensUsed += usage.totalTokens;
-        updateTokenCounter();
+        currentConversationId = data.conversationId;
+        $("chatTitle").textContent = data.title;
         $("chatStatus").textContent = "Powered by " + data.model;
+        updateChatFooter(data.conversationTotals.tokens, data.conversationTotals.costUsd);
+
+        // Refresh the sidebar: a new chat appears, an existing one moves to the top
+        await loadConversations();
     } catch (error) {
         typing.remove();
         addMessage("error", "Could not reach the AI assistant. Is the chatbot server running on port 3001?");
@@ -451,6 +638,13 @@ async function sendChatMessage(text) {
 // Grow the textarea with its content (up to the CSS max-height)
 function resizeChatInput() {
     const input = $("chatInput");
+
+    // Empty box: go back to the default CSS height (measuring an empty box can be wrong)
+    if (!input.value) {
+        input.style.height = "";
+        return;
+    }
+
     input.style.height = "auto";
     input.style.height = (input.scrollHeight + 2) + "px"; // +2 for the top/bottom border
 }
@@ -473,6 +667,7 @@ $("logoutButton").addEventListener("click", logout);
 $("openChatButton").addEventListener("click", openChat);
 $("chatBackButton").addEventListener("click", () => showView("profile"));
 $("newChatButton").addEventListener("click", newChat);
+$("sidebarToggle").addEventListener("click", () => $("chatView").classList.toggle("sidebar-open"));
 
 $("chatForm").addEventListener("submit", (event) => {
     event.preventDefault();
