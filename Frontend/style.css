@@ -847,3 +847,113 @@ textarea.invalid {
         transform: none;
     }
 }
+
+
+/* ---------- Detailed errors ---------- */
+
+.message.detailed {
+    line-height: 1.45;
+}
+
+.error-title {
+    display: block;
+}
+
+.error-problems {
+    margin: 6px 0 0;
+    padding-left: 18px;
+}
+
+.error-hint {
+    margin-top: 6px;
+}
+
+.error-details {
+    margin-top: 6px;
+    font-size: 12px;
+    opacity: 0.85;
+}
+
+.error-meta {
+    margin-top: 6px;
+    font-size: 11px;
+    font-family: Consolas, "Courier New", monospace;
+    opacity: 0.7;
+}
+
+.msg.error .bubble.error-card {
+    border: 1px solid var(--error-text);
+    max-width: 520px;
+}
+
+.retry-button {
+    margin-top: 10px;
+    padding: 6px 12px;
+    border: 1px solid var(--error-text);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--error-text);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.retry-button:hover {
+    background: var(--error-text);
+    color: #fff;
+}
+
+/* Neutral note in the chat (e.g. after pressing Stop) */
+.msg.info {
+    align-self: center;
+    max-width: 90%;
+}
+
+.msg.info .bubble {
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--text-muted);
+    font-size: 13px;
+    text-align: center;
+}
+
+
+/* ---------- "Generating..." awareness ---------- */
+
+.typing .bubble {
+    align-items: center;
+    gap: 12px;
+}
+
+.typing-dots {
+    display: flex;
+    gap: 5px;
+}
+
+.typing-status {
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+#chatStatus.generating {
+    color: var(--primary);
+    font-weight: 600;
+    animation: pulse 1.4s infinite ease-in-out;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.45; }
+}
+
+/* The send button turns into a Stop button while waiting */
+.send-button.stop {
+    background: var(--error-text);
+    font-size: 14px;
+}
+
+.send-button.stop:hover:not(:disabled) {
+    background: var(--error-text);
+    filter: brightness(1.1);
+}

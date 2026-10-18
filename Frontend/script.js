@@ -5,7 +5,7 @@ function $(id) {
     return document.getElementById(id);
 }
 
-// Show a colored status message ("success" or "error")
+// Show a short colored status message ("success" or "error")
 function showMessage(element, text, type) {
     element.textContent = text;
     element.className = "message " + type;
@@ -28,22 +28,158 @@ function setLoading(button, isLoading, loadingText) {
     }
 }
 
-// Send JSON to the API and return { ok, data }. Network failures become a friendly error.
-async function sendJson(url, body) {
-    try {
-        const response = await fetch(url, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify(body)
-        });
 
-        const data = await response.json();
-        return { ok: response.ok, data: data };
-    } catch (error) {
-        return { ok: false, data: { message: "Could not reach the server. Please try again." } };
+// ---------- Talking to the API ----------
+
+// The error we show when the server can't be reached at all (no HTTP response).
+// Same shape as the API's own errors, so one function can display both.
+function networkError() {
+    return {
+        statusCode: 0,
+        error: "Network Error",
+        code: "NETWORK_ERROR",
+        message: "Could not reach the server",
+        hint: "Check that the server is running (npm run start:dev) and try again.",
+        retryable: true
+    };
+}
+
+// One function for every request to our NestJS API.
+// Returns { ok, status, data }. `data` is the JSON body: the result, or a detailed error:
+//   { statusCode, error, code, message, hint, retryable, details }
+async function api(path, options) {
+    const opts = options || {};
+    const headers = { "Content-Type": "application/json" };
+
+    if (opts.auth) {
+        headers["Authorization"] = "Bearer " + localStorage.getItem("token");
     }
+
+    let response;
+    try {
+        response = await fetch(path, {
+            method: opts.method || "GET",
+            headers: headers,
+            body: opts.body ? JSON.stringify(opts.body) : undefined,
+            signal: opts.signal // lets the chat's Stop button cancel the request
+        });
+    } catch (error) {
+        if (error.name === "AbortError") {
+            throw error; // the user pressed Stop: let the caller handle it
+        }
+        return { ok: false, status: 0, data: networkError() };
+    }
+
+    // 204 No Content (after a delete) has no body to read
+    let data = null;
+    if (response.status !== 204) {
+        try {
+            data = await response.json();
+        } catch (error) {
+            data = { statusCode: response.status, error: response.statusText, code: "BAD_RESPONSE", message: "The server sent an unexpected response", retryable: true };
+        }
+    }
+
+    return { ok: response.ok, status: response.status, data: data };
+}
+
+
+// ---------- Displaying errors in detail ----------
+
+// Turn an API error's `details` into readable "label: value" pairs
+const DETAIL_LABELS = {
+    model: "AI model",
+    retryAfterSeconds: "Retry after",
+    timeoutSeconds: "Timeout",
+    elapsedMs: "Waited",
+    providerStatus: "Google status",
+    providerStatusCode: "Google HTTP code",
+    quota: "Quota",
+    limit: "Limit",
+    limitBytes: "Max size",
+    received: "Received",
+    email: "Email",
+    expiredAt: "Expired at",
+    blockReason: "Block reason",
+    finishReason: "Finish reason",
+    reason: "Reason"
+};
+
+function formatSeconds(seconds) {
+    if (seconds >= 3600) {
+        return Math.floor(seconds / 3600) + " h " + Math.round((seconds % 3600) / 60) + " min";
+    }
+    if (seconds >= 60) {
+        return Math.round(seconds / 60) + " min";
+    }
+    return seconds + " s";
+}
+
+function formatDetail(key, value) {
+    if (key === "retryAfterSeconds") return formatSeconds(value);
+    if (key === "timeoutSeconds") return value < 1 ? Math.round(value * 1000) + " ms" : formatSeconds(value);
+    if (key === "elapsedMs") return (value / 1000).toFixed(1) + " s";
+    if (key === "limitBytes") return Math.round(value / 1024) + " KB";
+    if (key === "expiredAt") return new Date(value).toLocaleTimeString();
+    return String(value);
+}
+
+// Build the inside of an error box (used by the forms AND the chat):
+//   title line, list of problems, hint, details, and "503 Service Unavailable · AI_OVERLOADED"
+function buildErrorContent(data) {
+    const fragment = document.createDocumentFragment();
+    const details = data.details || {};
+
+    const title = document.createElement("strong");
+    title.className = "error-title";
+    title.textContent = Array.isArray(details.problems) ? "Please fix the following:" : data.message;
+    fragment.appendChild(title);
+
+    // Validation errors: one line per problem
+    if (Array.isArray(details.problems)) {
+        const list = document.createElement("ul");
+        list.className = "error-problems";
+        details.problems.forEach((problem) => {
+            const item = document.createElement("li");
+            item.textContent = problem;
+            list.appendChild(item);
+        });
+        fragment.appendChild(list);
+    }
+
+    if (data.hint) {
+        const hint = document.createElement("div");
+        hint.className = "error-hint";
+        hint.textContent = data.hint;
+        fragment.appendChild(hint);
+    }
+
+    // Extra facts, e.g. "AI model: gemini-3-flash-preview · Retry after: 10 s"
+    const facts = Object.keys(details)
+        .filter((key) => key !== "problems" && details[key] !== undefined && details[key] !== null && DETAIL_LABELS[key])
+        .map((key) => DETAIL_LABELS[key] + ": " + formatDetail(key, details[key]));
+
+    if (facts.length > 0) {
+        const factLine = document.createElement("div");
+        factLine.className = "error-details";
+        factLine.textContent = facts.join(" · ");
+        fragment.appendChild(factLine);
+    }
+
+    // The technical identity of the error, small and muted
+    const meta = document.createElement("div");
+    meta.className = "error-meta";
+    meta.textContent = (data.statusCode ? data.statusCode + " " : "") + (data.error || "Error") + (data.code ? " · " + data.code : "");
+    fragment.appendChild(meta);
+
+    return fragment;
+}
+
+// Show a detailed API error inside a form's message area
+function showApiError(element, data) {
+    element.textContent = "";
+    element.className = "message error detailed";
+    element.appendChild(buildErrorContent(data || networkError()));
 }
 
 
@@ -79,21 +215,23 @@ async function register(event) {
 
     const message = $("registerMessage");
     const button = $("registerButton");
-
     const email = $("registerEmail").value;
 
     setLoading(button, true, "Creating account...");
 
-    const result = await sendJson("/register", {
-        username: $("registerUsername").value,
-        email: email,
-        password: $("registerPassword").value
+    const result = await api("/register", {
+        method: "POST",
+        body: {
+            username: $("registerUsername").value,
+            email: email,
+            password: $("registerPassword").value
+        }
     });
 
     setLoading(button, false);
 
     if (!result.ok) {
-        showMessage(message, result.data.message, "error");
+        showApiError(message, result.data);
         return;
     }
 
@@ -118,15 +256,18 @@ async function login(event) {
 
     setLoading(button, true, "Logging in...");
 
-    const result = await sendJson("/login", {
-        email: $("loginEmail").value,
-        password: $("loginPassword").value
+    const result = await api("/login", {
+        method: "POST",
+        body: {
+            email: $("loginEmail").value,
+            password: $("loginPassword").value
+        }
     });
 
     setLoading(button, false);
 
     if (!result.ok) {
-        showMessage(message, result.data.message, "error");
+        showApiError(message, result.data);
         return;
     }
 
@@ -143,41 +284,31 @@ async function login(event) {
 // ---------- Profile ----------
 
 async function loadProfile() {
-    const token = localStorage.getItem("token");
-
-    if (!token) {
+    if (!localStorage.getItem("token")) {
         showView("auth");
         return;
     }
 
-    try {
-        const response = await fetch("/profile", {
-            headers: {
-                "Authorization": "Bearer " + token
-            }
-        });
+    const result = await api("/profile", { auth: true });
 
-        const data = await response.json();
-
-        if (!response.ok) {
-            // Token is invalid or expired: forget it and ask the user to log in again
+    if (!result.ok) {
+        // Token invalid/expired, or server down: back to the login screen with the reason
+        if (result.status === 401 || result.status === 404) {
             localStorage.removeItem("token");
-            showView("auth");
-            showTab("login");
-            showMessage($("loginMessage"), data.message, "error");
-            return;
         }
-
-        $("profileName").textContent = data.user.username;
-        $("profileEmail").textContent = data.user.email;
-        $("profileAvatar").textContent = data.user.username.charAt(0).toUpperCase();
-        currentUsername = data.user.username;
-
-        showView("profile");
-    } catch (error) {
         showView("auth");
-        showMessage($("loginMessage"), "Could not reach the server. Please try again.", "error");
+        showTab("login");
+        showApiError($("loginMessage"), result.data);
+        return;
     }
+
+    const user = result.data.user;
+    $("profileName").textContent = user.username;
+    $("profileEmail").textContent = user.email;
+    $("profileAvatar").textContent = user.username.charAt(0).toUpperCase();
+    currentUsername = user.username;
+
+    showView("profile");
 }
 
 
@@ -204,6 +335,7 @@ function backToLogin() {
     $("requestForm").reset();
     $("requestError").textContent = "";
     $("phoneError").textContent = "";
+    clearMessage($("requestServerError"));
     $("requestMessage").classList.remove("invalid");
     $("requestPhone").classList.remove("invalid");
     $("guestFormContainer").hidden = false;
@@ -226,6 +358,7 @@ async function submitRequest(event) {
 
     requestError.textContent = "";
     phoneError.textContent = "";
+    clearMessage($("requestServerError"));
     messageInput.classList.remove("invalid");
     phoneInput.classList.remove("invalid");
 
@@ -253,12 +386,12 @@ async function submitRequest(event) {
     const button = $("submitRequestButton");
     setLoading(button, true, "Submitting...");
 
-    const result = await sendJson("/requests", { message: message, phone: phone });
+    const result = await api("/requests", { method: "POST", body: { message: message, phone: phone } });
 
     setLoading(button, false);
 
     if (!result.ok) {
-        requestError.textContent = result.data.message;
+        showApiError($("requestServerError"), result.data);
         return;
     }
 
@@ -268,49 +401,36 @@ async function submitRequest(event) {
 }
 
 
-// ---------- AI chat (talks to the NestJS chatbot API) ----------
-
-// A different origin than this page (port 3001 vs 3000), so CORS applies
-const CHATBOT_URL = "http://localhost:3001";
+// ---------- AI chat ----------
 
 // The chat currently on screen (null = a new chat that isn't saved yet).
-// Conversations are stored in MongoDB by the chatbot API, so they survive
+// Conversations are stored in MongoDB by the API, so they survive
 // "New chat", page reloads and server restarts.
 let currentConversationId = null;
 let currentUsername = "";
-let chatBusy = false;
+let currentModel = "Gemini";
+
+// While a reply is being generated: lets the Stop button cancel the request
+let chatAbortController = null;
 
 
-// fetch() to the chatbot API, always sending our JWT.
-// The chatbot verifies the same token the Express app issued at login.
-async function chatbotRequest(path, options) {
-    const response = await fetch(CHATBOT_URL + path, {
-        method: (options && options.method) || "GET",
-        headers: {
-            "Content-Type": "application/json",
-            "Authorization": "Bearer " + localStorage.getItem("token")
-        },
-        body: options && options.body ? JSON.stringify(options.body) : undefined
-    });
-
-    // 204 No Content (after a delete) has no body to read
-    const data = response.status === 204 ? null : await response.json();
-
-    // Token missing, invalid or expired: send the user back to the login screen
-    if (response.status === 401) {
-        endSession(errorText(data));
-    }
-
-    return { ok: response.ok, status: response.status, data: data };
-}
-
-
-function endSession(message) {
+function endSession(data) {
     localStorage.removeItem("token");
     resetChat();
     showView("auth");
     showTab("login");
-    showMessage($("loginMessage"), message || "Please log in again.", "error");
+    showApiError($("loginMessage"), data);
+}
+
+
+// Every chat request needs the token. A 401 means the session ended: go back to login.
+async function chatApi(path, options) {
+    const result = await api(path, Object.assign({ auth: true }, options));
+
+    if (result.status === 401) {
+        endSession(result.data);
+    }
+    return result;
 }
 
 
@@ -347,6 +467,7 @@ async function openChat() {
 
 // Clear the screen for a new, unsaved chat (saved chats stay in the sidebar)
 function resetChat() {
+    stopGenerating();
     currentConversationId = null;
 
     $("chatMessages").querySelectorAll(".msg").forEach((el) => el.remove());
@@ -367,55 +488,53 @@ function newChat() {
 // ----- Sidebar: list, open and delete saved conversations -----
 
 async function loadConversations() {
-    try {
-        const result = await chatbotRequest("/conversations");
+    const result = await chatApi("/conversations");
+    const empty = $("conversationEmpty");
 
-        if (!result.ok) {
-            return;
-        }
-
-        const list = $("conversationList");
-        list.innerHTML = "";
-        $("conversationEmpty").textContent = "No saved chats yet.";
-        $("conversationEmpty").hidden = result.data.length > 0;
-
-        result.data.forEach((conversation) => {
-            const item = document.createElement("li");
-            item.className = "conversation-item";
-            item.dataset.id = conversation.id;
-
-            const openButton = document.createElement("button");
-            openButton.type = "button";
-            openButton.className = "conversation-open";
-
-            const title = document.createElement("span");
-            title.textContent = conversation.title; // textContent: titles are user input
-
-            const details = document.createElement("small");
-            const questions = conversation.messageCount / 2; // each exchange = question + answer
-            details.textContent =
-                questions + (questions === 1 ? " message" : " messages") + " · " +
-                new Date(conversation.updatedAt).toLocaleDateString();
-
-            openButton.append(title, details);
-            openButton.addEventListener("click", () => openConversation(conversation.id));
-
-            const deleteButton = document.createElement("button");
-            deleteButton.type = "button";
-            deleteButton.className = "conversation-delete";
-            deleteButton.textContent = "✕";
-            deleteButton.setAttribute("aria-label", "Delete chat");
-            deleteButton.addEventListener("click", () => deleteConversation(conversation.id));
-
-            item.append(openButton, deleteButton);
-            list.appendChild(item);
-        });
-
-        highlightActiveConversation();
-    } catch (error) {
-        $("conversationEmpty").hidden = false;
-        $("conversationEmpty").textContent = "Could not load chats. Is the chatbot server running?";
+    if (!result.ok) {
+        empty.hidden = false;
+        empty.textContent = result.data.message + ". " + (result.data.hint || "");
+        return;
     }
+
+    const list = $("conversationList");
+    list.innerHTML = "";
+    empty.textContent = "No saved chats yet.";
+    empty.hidden = result.data.length > 0;
+
+    result.data.forEach((conversation) => {
+        const item = document.createElement("li");
+        item.className = "conversation-item";
+        item.dataset.id = conversation.id;
+
+        const openButton = document.createElement("button");
+        openButton.type = "button";
+        openButton.className = "conversation-open";
+
+        const title = document.createElement("span");
+        title.textContent = conversation.title; // textContent: titles are user input
+
+        const details = document.createElement("small");
+        const questions = conversation.messageCount / 2; // each exchange = question + answer
+        details.textContent =
+            questions + (questions === 1 ? " message" : " messages") + " · " +
+            new Date(conversation.updatedAt).toLocaleDateString();
+
+        openButton.append(title, details);
+        openButton.addEventListener("click", () => openConversation(conversation.id));
+
+        const deleteButton = document.createElement("button");
+        deleteButton.type = "button";
+        deleteButton.className = "conversation-delete";
+        deleteButton.textContent = "✕";
+        deleteButton.setAttribute("aria-label", "Delete chat");
+        deleteButton.addEventListener("click", () => deleteConversation(conversation.id));
+
+        item.append(openButton, deleteButton);
+        list.appendChild(item);
+    });
+
+    highlightActiveConversation();
 }
 
 
@@ -427,32 +546,28 @@ function highlightActiveConversation() {
 
 
 async function openConversation(id) {
-    try {
-        const result = await chatbotRequest("/conversations/" + id);
+    const result = await chatApi("/conversations/" + id);
 
-        if (!result.ok) {
-            addMessage("error", errorText(result.data));
-            return;
-        }
-
-        resetChat();
-        currentConversationId = id;
-        $("chatTitle").textContent = result.data.title;
-
-        result.data.messages.forEach((message) => {
-            if (message.role === "user") {
-                addMessage("user", message.text);
-            } else {
-                addMessage("bot", message.text, message.tokens + " tokens · ≈ " + formatCost(message.costUsd));
-            }
-        });
-
-        updateChatFooter(result.data.totalTokens, result.data.totalCostUsd);
-        highlightActiveConversation();
-        $("chatView").classList.remove("sidebar-open");
-    } catch (error) {
-        addMessage("error", "Could not load this chat. Is the chatbot server running?");
+    if (!result.ok) {
+        addErrorMessage(result.data);
+        return;
     }
+
+    resetChat();
+    currentConversationId = id;
+    $("chatTitle").textContent = result.data.title;
+
+    result.data.messages.forEach((message) => {
+        if (message.role === "user") {
+            addMessage("user", message.text);
+        } else {
+            addMessage("bot", message.text, message.tokens + " tokens · ≈ " + formatCost(message.costUsd));
+        }
+    });
+
+    updateChatFooter(result.data.totalTokens, result.data.totalCostUsd);
+    highlightActiveConversation();
+    $("chatView").classList.remove("sidebar-open");
 }
 
 
@@ -461,12 +576,16 @@ async function deleteConversation(id) {
         return;
     }
 
-    const result = await chatbotRequest("/conversations/" + id, { method: "DELETE" });
+    const result = await chatApi("/conversations/" + id, { method: "DELETE" });
 
-    if (result.ok && id === currentConversationId) {
-        resetChat();
+    if (!result.ok) {
+        addErrorMessage(result.data);
+        return;
     }
 
+    if (id === currentConversationId) {
+        resetChat();
+    }
     await loadConversations();
 }
 
@@ -507,22 +626,25 @@ function formatReply(text) {
 }
 
 
-// Add a message bubble to the chat. type: "user" | "bot" | "error" | "typing"
+function scrollChatToBottom() {
+    $("chatMessages").scrollTop = $("chatMessages").scrollHeight;
+}
+
+
+// Add a message bubble to the chat. type: "user" | "bot" | "info"
 function addMessage(type, text, meta) {
     $("chatEmpty").hidden = true;
 
     const message = document.createElement("div");
-    message.className = "msg " + (type === "typing" ? "bot typing" : type);
+    message.className = "msg " + type;
 
     const bubble = document.createElement("div");
     bubble.className = "bubble";
 
-    if (type === "typing") {
-        bubble.innerHTML = "<span></span><span></span><span></span>";
-    } else if (type === "bot") {
+    if (type === "bot") {
         bubble.innerHTML = formatReply(text); // safe: formatReply escapes first
     } else {
-        bubble.textContent = text; // user text and errors are shown exactly as typed
+        bubble.textContent = text; // user text is shown exactly as typed
     }
 
     message.appendChild(bubble);
@@ -555,52 +677,143 @@ function addMessage(type, text, meta) {
     }
 
     $("chatMessages").appendChild(message);
-    $("chatMessages").scrollTop = $("chatMessages").scrollHeight;
-
+    scrollChatToBottom();
     return message;
 }
 
 
-// Nest validation errors come back as an array of messages; others as a string
-function errorText(data) {
-    if (data && Array.isArray(data.message)) {
-        return data.message.join(" ");
+// A detailed error bubble. If retrying makes sense, it gets a "Try again" button.
+function addErrorMessage(data, retryText) {
+    $("chatEmpty").hidden = true;
+
+    const message = document.createElement("div");
+    message.className = "msg error";
+
+    const bubble = document.createElement("div");
+    bubble.className = "bubble error-card";
+    bubble.appendChild(buildErrorContent(data || networkError()));
+
+    if (data && data.retryable && retryText) {
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.className = "retry-button";
+        retry.textContent = "↻ Try again";
+        retry.addEventListener("click", () => {
+            message.remove();
+            sendChatMessage(retryText, { isRetry: true });
+        });
+        bubble.appendChild(retry);
     }
-    return (data && data.message) || "Something went wrong, please try again.";
+
+    message.appendChild(bubble);
+    $("chatMessages").appendChild(message);
+    scrollChatToBottom();
+    return message;
 }
 
 
-async function sendChatMessage(text) {
-    const message = text.trim();
+// ----- "Generating..." awareness -----
 
-    if (!message || chatBusy) {
-        return;
+// What the status line says, depending on how long we've been waiting
+function generatingText(seconds) {
+    if (seconds < 3) return "Sending your message to " + currentModel + "...";
+    if (seconds < 8) return "The AI is thinking and writing a reply...";
+    if (seconds < 14) return "Still working: longer answers take more time...";
+    return "This is taking longer than usual. Google may be busy; you can press Stop.";
+}
+
+// Shows the animated "typing" bubble with a status line and a live timer.
+// Returns a function that removes it again.
+function showGenerating() {
+    const message = document.createElement("div");
+    message.className = "msg bot typing";
+
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+
+    const dots = document.createElement("div");
+    dots.className = "typing-dots";
+    dots.innerHTML = "<span></span><span></span><span></span>";
+
+    const status = document.createElement("div");
+    status.className = "typing-status";
+
+    bubble.append(dots, status);
+    message.appendChild(bubble);
+    $("chatMessages").appendChild(message);
+    scrollChatToBottom();
+
+    const startedAt = Date.now();
+    const update = () => {
+        const seconds = Math.floor((Date.now() - startedAt) / 1000);
+        status.textContent = generatingText(seconds) + "  " + seconds + "s";
+    };
+    update();
+    const timer = setInterval(update, 500);
+
+    // Header + send button switch into "generating" mode
+    $("chatStatus").textContent = "● Generating a response...";
+    $("chatStatus").classList.add("generating");
+    $("chatSendButton").classList.add("stop");
+    $("chatSendButton").textContent = "■";
+    $("chatSendButton").setAttribute("aria-label", "Stop generating");
+
+    return () => {
+        clearInterval(timer);
+        message.remove();
+        $("chatStatus").textContent = "Powered by " + currentModel;
+        $("chatStatus").classList.remove("generating");
+        $("chatSendButton").classList.remove("stop");
+        $("chatSendButton").textContent = "➤";
+        $("chatSendButton").setAttribute("aria-label", "Send");
+    };
+}
+
+// The Stop button: cancel the request we're waiting for
+function stopGenerating() {
+    if (chatAbortController) {
+        chatAbortController.abort();
+    }
+}
+
+
+async function sendChatMessage(text, options) {
+    const message = text.trim();
+    const isRetry = options && options.isRetry;
+
+    if (!message || chatAbortController) {
+        return; // empty, or a reply is already being generated
     }
 
-    chatBusy = true;
-    $("chatSendButton").disabled = true;
     $("chatInput").value = "";
     resizeChatInput();
 
-    addMessage("user", message);
-    const typing = addMessage("typing");
+    if (!isRetry) {
+        addMessage("user", message);
+    }
+
+    chatAbortController = new AbortController();
+    const hideGenerating = showGenerating();
     const startTime = performance.now();
 
     try {
         // The server loads this conversation's history from MongoDB and saves the new
         // exchange, so we only send the new message and which chat it belongs to.
-        const result = await chatbotRequest("/chat", {
+        const result = await chatApi("/chat", {
             method: "POST",
             body: {
                 message: message,
                 conversationId: currentConversationId || undefined
-            }
+            },
+            signal: chatAbortController.signal
         });
 
-        typing.remove();
+        hideGenerating();
 
         if (!result.ok) {
-            addMessage("error", errorText(result.data));
+            if (result.status !== 401) {
+                addErrorMessage(result.data, message);
+            }
             return;
         }
 
@@ -608,6 +821,7 @@ async function sendChatMessage(text) {
         const usage = data.usage;
         const seconds = ((performance.now() - startTime) / 1000).toFixed(1);
 
+        currentModel = data.model;
         addMessage(
             "bot",
             data.reply,
@@ -625,11 +839,18 @@ async function sendChatMessage(text) {
         // Refresh the sidebar: a new chat appears, an existing one moves to the top
         await loadConversations();
     } catch (error) {
-        typing.remove();
-        addMessage("error", "Could not reach the AI assistant. Is the chatbot server running on port 3001?");
+        hideGenerating();
+
+        if (error.name === "AbortError") {
+            addMessage(
+                "info",
+                "You stopped waiting for this answer. The server may still finish it and save it to this chat; reopen the chat from the sidebar to check."
+            );
+        } else {
+            addErrorMessage(networkError(), message);
+        }
     } finally {
-        chatBusy = false;
-        $("chatSendButton").disabled = false;
+        chatAbortController = null;
         $("chatInput").focus();
     }
 }
@@ -669,9 +890,15 @@ $("chatBackButton").addEventListener("click", () => showView("profile"));
 $("newChatButton").addEventListener("click", newChat);
 $("sidebarToggle").addEventListener("click", () => $("chatView").classList.toggle("sidebar-open"));
 
+// The send button doubles as a Stop button while a reply is being generated
 $("chatForm").addEventListener("submit", (event) => {
     event.preventDefault();
-    sendChatMessage($("chatInput").value);
+
+    if (chatAbortController) {
+        stopGenerating();
+    } else {
+        sendChatMessage($("chatInput").value);
+    }
 });
 
 // Enter sends, Shift+Enter adds a new line
