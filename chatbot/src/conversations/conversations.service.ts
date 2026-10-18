@@ -1,8 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import type { Model } from 'mongoose';
 import { Conversation } from './conversation.schema.js';
 import type { ChatMessage, ConversationDocument } from './conversation.schema.js';
+import { AppException } from '../common/app.exception.js';
+
+const notFound = () =>
+  new AppException(HttpStatus.NOT_FOUND, 'NOT_FOUND', 'Conversation not found', {
+    hint: 'It may have been deleted, or it belongs to another user.',
+  });
 
 // Shapes returned to the client (no internal fields like __v)
 export interface ConversationSummary {
@@ -41,7 +47,7 @@ export class ConversationsService {
     const conversation = await this.conversationModel.findOne({ _id: id, userId });
 
     if (!conversation) {
-      throw new NotFoundException('Conversation not found');
+      throw notFound();
     }
 
     return conversation;
@@ -83,7 +89,7 @@ export class ConversationsService {
     const result = await this.conversationModel.deleteOne({ _id: id, userId });
 
     if (result.deletedCount === 0) {
-      throw new NotFoundException('Conversation not found');
+      throw notFound();
     }
   }
 

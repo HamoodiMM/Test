@@ -7,19 +7,21 @@ import { AppService } from './app.service.js';
 import { validateEnv } from './config/env.validation.js';
 import type { Env } from './config/env.validation.js';
 import { AuthModule } from './auth/auth.module.js';
+import { UsersModule } from './users/users.module.js';
+import { GuestRequestsModule } from './guest-requests/guest-requests.module.js';
 import { ChatModule } from './chat/chat.module.js';
 import { ConversationsModule } from './conversations/conversations.module.js';
 
 // The root module: plugs all feature modules together
 @Module({
   imports: [
-    // Reads chatbot/.env, validates it, and makes ConfigService available everywhere
+    // Reads .env, validates it, and makes ConfigService available everywhere
     ConfigModule.forRoot({
       isGlobal: true,
       validate: validateEnv,
     }),
 
-    // One MongoDB connection for the whole app (same database as the Express app)
+    // One MongoDB connection for the whole app
     MongooseModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService<Env, true>) => ({
@@ -28,18 +30,21 @@ import { ConversationsModule } from './conversations/conversations.module.js';
       }),
     }),
 
-    // Rate limit settings. Applied to POST /chat by UserThrottlerGuard (per user).
+    // Two named rate-limit counters. The numbers here are defaults; each controller that
+    // uses UserThrottlerGuard sets its own with @Throttle() (see common/throttle.config.ts).
     ThrottlerModule.forRoot({
       throttlers: [
-        { name: 'burst', ttl: 10_000, limit: 3 }, // max 3 messages per 10 seconds
-        { name: 'minute', ttl: 60_000, limit: 10 }, // max 10 messages per minute
+        { name: 'burst', ttl: 10_000, limit: 3 },
+        { name: 'minute', ttl: 60_000, limit: 10 },
       ],
-      errorMessage: 'Too many messages, please slow down and try again shortly',
+      errorMessage: 'Too many requests, please slow down',
     }),
 
-    AuthModule, // registers the global AuthGuard: every route needs a JWT unless @Public()
-    ConversationsModule,
-    ChatModule,
+    AuthModule, // register, login, and the global AuthGuard (every route needs a JWT unless @Public())
+    UsersModule, // GET /profile, GET /users
+    GuestRequestsModule, // POST /requests
+    ConversationsModule, // saved chats
+    ChatModule, // POST /chat (Gemini)
   ],
   controllers: [AppController],
   providers: [AppService],

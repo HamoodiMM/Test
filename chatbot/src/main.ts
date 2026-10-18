@@ -1,18 +1,36 @@
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import helmet from 'helmet';
+import { fileURLToPath } from 'node:url';
 import { AppModule } from './app.module.js';
 import type { Env } from './config/env.validation.js';
 import { AllExceptionsFilter } from './common/all-exceptions.filter.js';
 import { LoggingInterceptor } from './common/logging.interceptor.js';
 
+// The static frontend (HTML/CSS/JS), relative to this compiled file (dist/main.js)
+const FRONTEND_DIR = fileURLToPath(new URL('../../Frontend/', import.meta.url));
+
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   // Request lifecycle in Nest:
-  //   Guards (auth, rate limit) → Interceptor (before) → Pipes (validation) →
-  //   Controller → Interceptor (after) → response.   Any error → Exception filter.
+  //   Middleware (helmet, static files) → Guards (auth, rate limit) → Interceptor (before) →
+  //   Pipes (validation) → Controller → Interceptor (after) → response.
+  //   Any error → Exception filter.
+
+  // Security headers. The Content Security Policy only allows scripts, styles and
+  // fetch() calls from this same server, which blocks injected scripts (XSS).
+  app.use(helmet());
+
+  // Body size limit: reject huge requests (→ 413 PAYLOAD_TOO_LARGE)
+  app.useBodyParser('json', { limit: '20kb' });
+
+  // Serve the frontend from the same server and port as the API.
+  // Same origin = no CORS needed at all.
+  app.useStaticAssets(FRONTEND_DIR);
 
   // Validate every incoming body against its DTO class before it reaches a controller
   app.useGlobalPipes(
@@ -25,30 +43,20 @@ async function bootstrap() {
   );
 
   app.useGlobalInterceptors(new LoggingInterceptor()); // log method, URL, status, duration
-  app.useGlobalFilters(new AllExceptionsFilter()); // one consistent error shape
+  app.useGlobalFilters(new AllExceptionsFilter()); // one detailed error shape everywhere
 
   // `true` = values were validated, so get() returns the real type instead of `T | undefined`
   const config = app.get<ConfigService<Env, true>>(ConfigService);
   const port = config.get('PORT', { infer: true });
 
-  // CORS: browsers block a page on one origin (localhost:3000) from reading responses
-  // from another (localhost:3001) unless that server explicitly allows it.
-  // We allow exactly one origin: our own frontend. Not "*".
-  app.enableCors({
-    origin: config.get('CORS_ORIGIN', { infer: true }),
-    methods: ['GET', 'POST', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  });
-
-  // Interactive API documentation at http://localhost:3001/docs, generated from the
-  // controllers, DTOs and @Api... decorators. You can send test requests from it too.
+  // Interactive API documentation at /docs, generated from controllers, DTOs and @Api... decorators
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('My Auth App - Chatbot API')
+    .setTitle('My Auth App API')
     .setDescription(
-      'AI assistant powered by Gemini. Log in through the Express app, then click ' +
-        '"Authorize" and paste the JWT to try the protected routes.',
+      'Accounts, guest requests and an AI assistant powered by Gemini. ' +
+        'Call POST /login, then click "Authorize" and paste the token to try the protected routes.',
     )
-    .setVersion('1.0')
+    .setVersion('2.0')
     .addBearerAuth()
     .build();
   SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, swaggerConfig));
@@ -56,10 +64,7 @@ async function bootstrap() {
   await app.listen(port);
 
   // Log which model we use, but never the API key
-  Logger.log(
-    `Chatbot running on http://localhost:${port} (model: ${config.get('GEMINI_MODEL', { infer: true })})`,
-    'Bootstrap',
-  );
+  Logger.log(`App running on http://localhost:${port} (AI model: ${config.get('GEMINI_MODEL', { infer: true })})`, 'Bootstrap');
   Logger.log(`API docs: http://localhost:${port}/docs`, 'Bootstrap');
 }
 await bootstrap();

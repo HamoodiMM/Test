@@ -1,4 +1,5 @@
-import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import { ExecutionContext } from '@nestjs/common';
+import { AppException } from '../common/app.exception.js';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { AuthGuard } from './auth.guard.js';
@@ -41,7 +42,8 @@ describe('AuthGuard', () => {
   it('rejects a header without "Bearer "', async () => {
     const token = jwtService.sign({ userId: 'abc123' });
     const { context } = contextWith(token);
-    await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
+    await expect(guard.canActivate(context)).rejects.toThrow(AppException);
+    await expect(guard.canActivate(context)).rejects.toMatchObject({ code: 'AUTH_TOKEN_MISSING' });
   });
 
   it('rejects a token signed with a different secret', async () => {
@@ -56,6 +58,7 @@ describe('AuthGuard', () => {
     const expired = jwtService.sign({ userId: 'abc123', exp: Math.floor(Date.now() / 1000) - 60 });
     const { context } = contextWith(`Bearer ${expired}`);
     await expect(guard.canActivate(context)).rejects.toThrow('Token expired, please log in again');
+    await expect(guard.canActivate(context)).rejects.toMatchObject({ code: 'AUTH_TOKEN_EXPIRED' });
   });
 
   it('lets @Public() routes through without a token', async () => {

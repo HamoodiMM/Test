@@ -1,15 +1,14 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import { CanActivate, ExecutionContext, HttpStatus, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService, TokenExpiredError } from '@nestjs/jwt';
 import type { Request } from 'express';
 import { IS_PUBLIC_KEY } from './public.decorator.js';
 import type { AuthUser } from './auth.types.js';
+import { AppException } from '../common/app.exception.js';
 
 // A guard decides whether a request may continue (return true) or is rejected (throw).
 // Registered globally in AuthModule, so EVERY route requires a valid JWT unless it's @Public().
-//
-// The token was issued by the Express app. We can verify it here because both apps
-// share the same JWT_SECRET: two separate services trusting one token.
+// The token is issued by AuthService at login and signed with JWT_SECRET.
 @Injectable()
 export class AuthGuard implements CanActivate {
   constructor(
@@ -33,7 +32,9 @@ export class AuthGuard implements CanActivate {
     const [type, token] = request.headers.authorization?.split(' ') ?? [];
 
     if (type !== 'Bearer' || !token) {
-      throw new UnauthorizedException('Authentication token missing');
+      throw new AppException(HttpStatus.UNAUTHORIZED, 'AUTH_TOKEN_MISSING', 'Authentication token missing', {
+        hint: 'Log in first. Protected routes need the header "Authorization: Bearer <token>".',
+      });
     }
 
     // 3. Verify signature + expiration (uses JWT_SECRET from JwtModule)
@@ -43,7 +44,7 @@ export class AuthGuard implements CanActivate {
       });
 
       if (typeof payload.userId !== 'string') {
-        throw new UnauthorizedException('Invalid token');
+        throw new Error('Token payload has no userId');
       }
 
       // 4. Make the user available to the controller (see @CurrentUser)
@@ -54,9 +55,14 @@ export class AuthGuard implements CanActivate {
       return true;
     } catch (error) {
       if (error instanceof TokenExpiredError) {
-        throw new UnauthorizedException('Token expired, please log in again');
+        throw new AppException(HttpStatus.UNAUTHORIZED, 'AUTH_TOKEN_EXPIRED', 'Token expired, please log in again', {
+          hint: 'Sessions last 1 hour. Log in again to get a new token.',
+          details: { expiredAt: error.expiredAt.toISOString() },
+        });
       }
-      throw new UnauthorizedException('Invalid token');
+      throw new AppException(HttpStatus.UNAUTHORIZED, 'AUTH_TOKEN_INVALID', 'Invalid token', {
+        hint: 'The token is malformed or was not signed by this server. Log in again.',
+      });
     }
   }
 }

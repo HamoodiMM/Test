@@ -1,9 +1,19 @@
 import { z } from 'zod';
 
-// Every environment variable the chatbot needs, with its rules.
-// Same idea as the Zod request schemas in the Express app, applied to configuration.
+// Every environment variable the app needs, with its rules.
+// Validated once at startup: the app refuses to start with missing or invalid settings.
 const envSchema = z.object({
-  PORT: z.coerce.number().int().positive().default(3001),
+  PORT: z.coerce.number().int().positive().default(3000),
+
+  // users, guest requests and conversations all live in this database
+  MONGODB_URI: z
+    .string({ error: 'MONGODB_URI is required' })
+    .min(1, 'MONGODB_URI is required'),
+
+  // Signs and verifies login tokens (JWTs). Long and random; never commit it.
+  JWT_SECRET: z
+    .string({ error: 'JWT_SECRET is required' })
+    .min(32, 'JWT_SECRET must be at least 32 characters'),
 
   GEMINI_API_KEY: z
     .string({ error: 'GEMINI_API_KEY is required' })
@@ -11,21 +21,8 @@ const envSchema = z.object({
 
   GEMINI_MODEL: z.string().min(1).default('gemini-3.5-flash-lite'),
 
-  // The website allowed to call this API from a browser (the Express frontend)
-  CORS_ORIGIN: z.url({ error: 'CORS_ORIGIN must be a URL' }).default('http://localhost:3000'),
-
-  // How long to wait for Gemini before giving up
-  GEMINI_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
-
-  // Same database as the Express app: conversations are stored next to users
-  MONGODB_URI: z
-    .string({ error: 'MONGODB_URI is required' })
-    .min(1, 'MONGODB_URI is required'),
-
-  // Must be the SAME secret as the Express app, so we can verify the tokens it issues
-  JWT_SECRET: z
-    .string({ error: 'JWT_SECRET is required' })
-    .min(32, 'JWT_SECRET must be at least 32 characters'),
+  // How long to wait for Gemini before giving up (then the user gets a 504 AI_TIMEOUT)
+  GEMINI_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
 
   // Paid-tier prices (USD per 1 million tokens), used to show what each message would cost.
   // Output price includes thinking tokens.

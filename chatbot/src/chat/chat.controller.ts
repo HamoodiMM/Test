@@ -3,7 +3,9 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ChatService } from './chat.service.js';
 import type { ChatReply } from './chat.service.js';
 import { ChatMessageDto } from './dto/chat-message.dto.js';
-import { UserThrottlerGuard } from './user-throttler.guard.js';
+import { Throttle } from '@nestjs/throttler';
+import { UserThrottlerGuard } from '../common/user-throttler.guard.js';
+import { CHAT_LIMITS } from '../common/throttle.config.js';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { AuthUser } from '../auth/auth.types.js';
 
@@ -15,6 +17,7 @@ import type { AuthUser } from '../auth/auth.types.js';
 //   global AuthGuard (valid JWT?) → UserThrottlerGuard (too many messages?) →
 //   ValidationPipe (valid body?) → this controller
 @UseGuards(UserThrottlerGuard)
+@Throttle(CHAT_LIMITS)
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
