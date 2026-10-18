@@ -33,7 +33,7 @@ describe('Chatbot API (e2e)', () => {
       });
   });
 
-  it('POST /chat without a token is rejected with 401', () => {
+  it('POST /chat without a token is rejected with 401 AUTH_TOKEN_MISSING', () => {
     return request(app.getHttpServer()).post('/chat').send({ message: 'hi' }).expect(401);
   });
 
