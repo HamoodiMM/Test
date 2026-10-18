@@ -1,12 +1,12 @@
 import type { Request } from 'express';
 
-// What the Express app puts inside the JWT when a user logs in
+// What AuthService puts inside the JWT when a user logs in
 export interface AuthUser {
   userId: string;
   username: string;
 }
 
-// An Express request after AuthGuard has verified the token
+// An HTTP request after AuthGuard has verified the token and attached the user
 export interface AuthenticatedRequest extends Request {
   user: AuthUser;
 }

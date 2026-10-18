@@ -11,7 +11,7 @@ import { AllExceptionsFilter } from './common/all-exceptions.filter.js';
 import { LoggingInterceptor } from './common/logging.interceptor.js';
 
 // The static frontend (HTML/CSS/JS), relative to this compiled file (dist/main.js)
-const FRONTEND_DIR = fileURLToPath(new URL('../../Frontend/', import.meta.url));
+const FRONTEND_DIR = fileURLToPath(new URL('../Frontend/', import.meta.url));
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
