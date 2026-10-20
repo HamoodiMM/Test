@@ -561,7 +561,11 @@ async function openConversation(id) {
         if (message.role === "user") {
             addMessage("user", message.text);
         } else {
-            addMessage("bot", message.text, message.tokens + " tokens · ≈ " + formatCost(message.costUsd));
+            addMessage(
+                "bot",
+                message.text,
+                message.tokens + " tokens · ≈ " + formatCost(message.costUsd) + (message.model ? " · " + message.model : "")
+            );
         }
     });
 
@@ -769,6 +773,57 @@ function showGenerating() {
     };
 }
 
+// ----- Model fallback notices -----
+
+// The main model that was unavailable during the previous reply (null = we were on the main model)
+let unavailablePrimaryModel = null;
+
+// A small banner in the chat, e.g. "⚠ Model capacity reached ..." (type: "warning" or "success")
+function addNotice(type, title, text) {
+    const message = document.createElement("div");
+    message.className = "msg notice " + type;
+
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+
+    const strong = document.createElement("strong");
+    strong.textContent = title;
+    bubble.appendChild(strong);
+    bubble.appendChild(document.createTextNode(" " + text));
+
+    message.appendChild(bubble);
+    $("chatMessages").appendChild(message);
+    scrollChatToBottom();
+}
+
+// The server tells us in `data.fallback` when a backup model answered.
+// We announce the switch once, and announce again when the main model is back.
+function showModelSwitchNotice(data) {
+    if (data.fallback) {
+        let text = data.fallback.message;
+
+        if (data.fallback.primaryAvailableAgainAt) {
+            const backAt = new Date(data.fallback.primaryAvailableAgainAt);
+            text += " " + data.fallback.from + " will be used again automatically after " +
+                backAt.toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" }) + ".";
+        }
+
+        // Only show it when something changed, not on every message while on the backup
+        if (unavailablePrimaryModel !== data.fallback.from + "→" + data.fallback.to) {
+            addNotice("warning", "⚠ Model capacity reached.", text);
+        }
+        unavailablePrimaryModel = data.fallback.from + "→" + data.fallback.to;
+        return;
+    }
+
+    // No fallback this time: if the previous reply used a backup, the main model is back
+    if (unavailablePrimaryModel) {
+        addNotice("success", "✓ Back to the main model.", data.primaryModel + " is available again, so it's answering again.");
+        unavailablePrimaryModel = null;
+    }
+}
+
+
 // The Stop button: cancel the request we're waiting for
 function stopGenerating() {
     if (chatAbortController) {
@@ -821,6 +876,9 @@ async function sendChatMessage(text, options) {
         const usage = data.usage;
         const seconds = ((performance.now() - startTime) / 1000).toFixed(1);
 
+        // Tell the user when the server switched models, and when it switched back
+        showModelSwitchNotice(data);
+
         currentModel = data.model;
         addMessage(
             "bot",
@@ -828,12 +886,12 @@ async function sendChatMessage(text, options) {
             usage.totalTokens + " tokens (in " + usage.inputTokens +
             " · thinking " + usage.thinkingTokens +
             " · out " + usage.outputTokens + ") · ≈ " + formatCost(usage.costUsd) +
-            " · " + seconds + "s"
+            " · " + seconds + "s · " + data.model
         );
 
         currentConversationId = data.conversationId;
         $("chatTitle").textContent = data.title;
-        $("chatStatus").textContent = "Powered by " + data.model;
+        $("chatStatus").textContent = "Powered by " + data.model + (data.fallback ? " (backup model)" : "");
         updateChatFooter(data.conversationTotals.tokens, data.conversationTotals.costUsd);
 
         // Refresh the sidebar: a new chat appears, an existing one moves to the top

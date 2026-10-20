@@ -957,3 +957,37 @@ textarea.invalid {
     background: var(--error-text);
     filter: brightness(1.1);
 }
+
+
+/* ---------- Model fallback notices ---------- */
+
+.msg.notice {
+    align-self: center;
+    max-width: 92%;
+}
+
+.msg.notice .bubble {
+    font-size: 13px;
+    padding: 8px 14px;
+    border-radius: 10px;
+    text-align: left;
+}
+
+.msg.notice.warning .bubble {
+    background: #fff4e0;
+    border: 1px solid #e8a33d;
+    color: #7a4d00;
+}
+
+.msg.notice.success .bubble {
+    background: var(--success-bg);
+    border: 1px solid var(--success-text);
+    color: var(--success-text);
+}
+
+@media (prefers-color-scheme: dark) {
+    .msg.notice.warning .bubble {
+        background: #3a2a10;
+        color: #f5c77a;
+    }
+}
