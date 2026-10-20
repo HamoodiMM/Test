@@ -21,6 +21,18 @@ const envSchema = z.object({
 
   GEMINI_MODEL: z.string().min(1).default('gemini-3.5-flash-lite'),
 
+  // Backup models, tried in order when GEMINI_MODEL hits a quota, is overloaded or times out.
+  // Comma-separated in .env, e.g. "gemini-3.5-flash,gemini-3.1-flash-lite"; turned into an array here.
+  GEMINI_FALLBACK_MODELS: z
+    .string()
+    .default('')
+    .transform((list) =>
+      list
+        .split(',')
+        .map((model) => model.trim())
+        .filter((model) => model.length > 0),
+    ),
+
   // How long to wait for Gemini before giving up (then the user gets a 504 AI_TIMEOUT)
   GEMINI_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
 

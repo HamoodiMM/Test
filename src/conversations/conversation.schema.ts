@@ -20,6 +20,10 @@ export class ChatMessage {
   @Prop()
   costUsd?: number;
 
+  // Which Gemini model wrote this reply (it can differ per message when a fallback was used)
+  @Prop()
+  model?: string;
+
   createdAt?: Date;
 }
 

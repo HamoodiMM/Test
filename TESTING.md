@@ -3,7 +3,7 @@
 Start the app with `npm run dev`, then test from the frontend at http://localhost:3000,
 the interactive docs at http://localhost:3000/docs, the browser console (F12 → Console), or Postman.
 
-Automated tests: `npm test` (unit) and `npm run test:e2e` (end-to-end, needs `.env`).
+Automated tests: `npm test` (unit, including the model-fallback tests, which use a fake Gemini and spend no quota) and `npm run test:e2e` (end-to-end, needs `.env`, makes no Gemini calls).
 
 ## Error format
 
@@ -121,7 +121,9 @@ Log in, then click **Open AI assistant**.
 | ☐ | AI timeout | Set `GEMINI_TIMEOUT_MS=1` in `.env`, restart, send a message (then set it back to `20000`) | **504** `AI_TIMEOUT` with a **↻ Try again** button |
 | ☐ | Wrong model | Set `GEMINI_MODEL=gemini-does-not-exist`, restart, send a message (then change it back) | **500** `AI_MISCONFIGURED`, hint names `GEMINI_MODEL` |
 | ☐ | Google overloaded | Happens on its own when a model is in high demand | **503** `AI_OVERLOADED`, retryable |
-| ☐ | Daily quota used up | Happens after the free daily requests for the model | **503** `AI_DAILY_QUOTA` with quota name, limit and wait time |
+| ☐ | Main model out of quota / overloaded | Happens on its own (or set `GEMINI_MODEL` to a model that returns 429) | **200** from a backup model, notice "⚠ Model capacity reached…" with the time the main model returns |
+| ☐ | Back to the main model | Send a message after the main model's cooldown ends | Notice "✓ Back to the main model", reply from `GEMINI_MODEL` again |
+| ☐ | All models unavailable | Every model in `GEMINI_MODEL` + `GEMINI_FALLBACK_MODELS` fails | **503** with `details.triedModels` listing each model and why |
 | ☐ | Server stopped | Stop the app and send a message | `NETWORK_ERROR` "Could not reach the server" with **↻ Try again** |
 
 ## General

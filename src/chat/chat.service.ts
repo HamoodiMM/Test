@@ -6,6 +6,11 @@ import type { Env } from '../config/env.validation.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { ConversationsService } from '../conversations/conversations.service.js';
 import { AppException } from '../common/app.exception.js';
+import type { ErrorCode } from '../common/app.exception.js';
+import { ModelAvailabilityService } from './model-availability.service.js';
+import type { UnavailableReason } from './model-availability.service.js';
+import { priceFor } from './model-pricing.js';
+import type { ModelPrice } from './model-pricing.js';
 
 // How many tokens one request used. Free-tier limits and pricing are counted in tokens.
 export interface TokenUsage {
@@ -16,11 +21,22 @@ export interface TokenUsage {
   costUsd: number; // what this request would cost on the paid tier
 }
 
+// Present when the reply did NOT come from the main model
+export interface FallbackInfo {
+  from: string; // the main model (GEMINI_MODEL)
+  to: string; // the model that actually answered
+  reason: UnavailableReason; // why the main model was skipped
+  message: string; // ready-to-show explanation for the user
+  primaryAvailableAgainAt?: string; // ISO time when the main model will be tried again
+}
+
 export interface ChatReply {
   conversationId: string;
   title: string;
   reply: string;
-  model: string;
+  model: string; // the exact model version that answered
+  primaryModel: string; // GEMINI_MODEL, so the UI can tell when we're back on it
+  fallback?: FallbackInfo;
   usage: TokenUsage;
   conversationTotals: { tokens: number; costUsd: number };
 }
@@ -29,6 +45,16 @@ export interface ChatReply {
 // The full conversation stays in MongoDB; this only limits what Gemini re-reads,
 // because every message of history costs input tokens on EVERY request.
 const MAX_CONTEXT_MESSAGES = 20;
+
+// Errors that mean "this model can't answer right now, but another one might"
+const FALLBACK_REASONS: ErrorCode[] = ['AI_DAILY_QUOTA', 'AI_RATE_LIMITED', 'AI_OVERLOADED', 'AI_TIMEOUT'];
+
+const REASON_TEXT: Record<UnavailableReason, string> = {
+  AI_DAILY_QUOTA: 'reached its free daily limit',
+  AI_RATE_LIMITED: 'reached its usage limit',
+  AI_OVERLOADED: 'is overloaded right now',
+  AI_TIMEOUT: 'did not answer in time',
+};
 
 // What Google puts inside a failed response (parsed from ApiError.message)
 interface GoogleErrorBody {
@@ -44,20 +70,26 @@ interface GoogleErrorBody {
   };
 }
 
+// The result of one successful Gemini call
+interface Generation {
+  model: string; // the model we asked for
+  response: GenerateContentResponse;
+  fallback?: FallbackInfo;
+}
+
 @Injectable()
 export class ChatService {
   private readonly logger = new Logger(ChatService.name);
   private readonly ai: GoogleGenAI;
-  private readonly model: string;
   private readonly timeoutMs: number;
-  private readonly inputPricePerMillion: number;
-  private readonly outputPricePerMillion: number;
+  private readonly defaultPrice: ModelPrice;
 
-  // Dependency injection: Nest passes in ConfigService (global) and
-  // ConversationsService (exported by ConversationsModule, which ChatModule imports)
+  // Dependency injection: Nest passes in ConfigService (global), ConversationsService
+  // (exported by ConversationsModule) and ModelAvailabilityService (provided by ChatModule)
   constructor(
     config: ConfigService<Env, true>,
     private readonly conversationsService: ConversationsService,
+    private readonly models: ModelAvailabilityService,
   ) {
     this.timeoutMs = config.get('GEMINI_TIMEOUT_MS', { infer: true });
 
@@ -67,9 +99,10 @@ export class ChatService {
       // Never wait forever on an external API
       httpOptions: { timeout: this.timeoutMs },
     });
-    this.model = config.get('GEMINI_MODEL', { infer: true });
-    this.inputPricePerMillion = config.get('GEMINI_INPUT_PRICE_PER_MILLION', { infer: true });
-    this.outputPricePerMillion = config.get('GEMINI_OUTPUT_PRICE_PER_MILLION', { infer: true });
+    this.defaultPrice = {
+      inputPerMillion: config.get('GEMINI_INPUT_PRICE_PER_MILLION', { infer: true }),
+      outputPerMillion: config.get('GEMINI_OUTPUT_PRICE_PER_MILLION', { infer: true }),
+    };
   }
 
   async sendMessage(user: AuthUser, message: string, conversationId?: string): Promise<ChatReply> {
@@ -87,33 +120,96 @@ export class ChatService {
       { role: 'user', parts: [{ text: message }] },
     ];
 
-    // 3. Call Gemini
-    const response = await this.generate(contents, user);
+    // 3. Call Gemini, falling back to backup models if the main one can't answer
+    const { model, response, fallback } = await this.generateWithFallback(contents, user);
 
-    // 4. Count tokens and calculate the cost
-    const usage = this.calculateUsage(response);
+    // 4. Count tokens and calculate the cost with the price of the model that answered
+    const usage = this.calculateUsage(response, model);
 
     // 5. Save the exchange. A new conversation is only created AFTER Gemini answered,
     //    so failed requests don't leave empty chats behind.
     const conversation = existing ?? (await this.conversationsService.create(user.userId, message));
+    const answeredBy = response.modelVersion ?? model;
 
     await this.conversationsService.addExchange(conversation, message, {
       text: response.text!,
       tokens: usage.totalTokens,
       costUsd: usage.costUsd,
+      model: answeredBy,
     });
 
     return {
       conversationId: conversation._id.toString(),
       title: conversation.title,
       reply: response.text!,
-      model: response.modelVersion ?? this.model,
+      model: answeredBy,
+      primaryModel: this.models.primaryModel,
+      fallback,
       usage,
       conversationTotals: {
         tokens: conversation.totalTokens,
         costUsd: conversation.totalCostUsd,
       },
     };
+  }
+
+  // Try the models in order (main model first, unless it's cooling down).
+  // - Quota / overload / timeout → put that model on cooldown and try the next one.
+  // - Any other error (bad key, blocked message...) → stop: another model won't fix it.
+  // - All models failed → throw the last error, listing every model that was tried.
+  private async generateWithFallback(contents: Content[], user: AuthUser): Promise<Generation> {
+    const primary = this.models.primaryModel;
+    const failures: Array<{ model: string; code: ErrorCode }> = [];
+    let lastError: AppException | undefined;
+
+    for (const model of this.models.candidates()) {
+      try {
+        const response = await this.generateOnce(model, contents, user);
+
+        if (model === primary) {
+          return { model, response };
+        }
+
+        // A backup model answered: explain why, so the user knows what happened
+        const primaryFailure = failures.find((f) => f.model === primary);
+        // Either it failed just now, or it was skipped because it's still cooling down
+        const reason = (primaryFailure?.code as UnavailableReason) ?? this.models.reasonFor(primary) ?? 'AI_OVERLOADED';
+        const availableAgainAt = this.models.availableAgainAt(primary);
+        this.logger.warn(`Answered with fallback model "${model}" because "${primary}" ${REASON_TEXT[reason]}`);
+
+        return {
+          model,
+          response,
+          fallback: {
+            from: primary,
+            to: model,
+            reason,
+            message: `${primary} ${REASON_TEXT[reason]}, so this answer came from ${model}.`,
+            primaryAvailableAgainAt: availableAgainAt?.toISOString(),
+          },
+        };
+      } catch (error) {
+        if (!(error instanceof AppException) || !FALLBACK_REASONS.includes(error.code)) {
+          throw error;
+        }
+
+        const retryAfter = error.extra.details?.retryAfterSeconds;
+        this.models.markUnavailable(model, error.code as UnavailableReason, typeof retryAfter === 'number' ? retryAfter : undefined);
+        failures.push({ model, code: error.code });
+        lastError = error;
+      }
+    }
+
+    // Every model failed: report the last error, plus what was tried
+    const tried = failures.map((f) => `${f.model} (${f.code})`);
+    throw new AppException(lastError!.getStatus(), lastError!.code, lastError!.message, {
+      ...lastError!.extra,
+      hint:
+        failures.length > 1
+          ? `All ${failures.length} configured models are unavailable right now. Try again later.`
+          : lastError!.extra.hint,
+      details: { ...lastError!.extra.details, triedModels: tried },
+    });
   }
 
   // Instructions the model follows for every message (the user never sees this).
@@ -126,19 +222,20 @@ export class ChatService {
     );
   }
 
-  private async generate(contents: Content[], user: AuthUser): Promise<GenerateContentResponse> {
+  // One attempt with one model
+  private async generateOnce(model: string, contents: Content[], user: AuthUser): Promise<GenerateContentResponse> {
     let response: GenerateContentResponse;
     const startedAt = Date.now();
 
     try {
       // One HTTPS request to Google's Gemini API
       response = await this.ai.models.generateContent({
-        model: this.model,
+        model,
         contents,
         config: { systemInstruction: this.systemInstruction(user) },
       });
     } catch (error) {
-      throw this.toAppException(error, Date.now() - startedAt);
+      throw this.toAppException(error, model, Date.now() - startedAt);
     }
 
     // Gemini can refuse to answer (e.g. safety filters), which gives an empty reply
@@ -150,30 +247,31 @@ export class ChatService {
       if (blockReason) {
         throw new AppException(HttpStatus.BAD_REQUEST, 'AI_BLOCKED', 'Your message was blocked by the AI safety filters', {
           hint: 'Rephrase your message and try again.',
-          details: { model: this.model, blockReason },
+          details: { model, blockReason },
         });
       }
       throw new AppException(HttpStatus.BAD_GATEWAY, 'AI_EMPTY_REPLY', 'The AI service returned an empty answer', {
         hint: 'This is usually temporary. Try sending the message again.',
         retryable: true,
-        details: { model: this.model, finishReason },
+        details: { model, finishReason },
       });
     }
 
     return response;
   }
 
-  // Price = tokens / 1,000,000 × price per million.
+  // Price = tokens / 1,000,000 × price per million (of the model that answered).
   // Thinking tokens are billed at the OUTPUT price, like the visible answer.
-  private calculateUsage(response: GenerateContentResponse): TokenUsage {
+  private calculateUsage(response: GenerateContentResponse, model: string): TokenUsage {
+    const price = priceFor(model, this.defaultPrice);
     const meta = response.usageMetadata;
     const inputTokens = meta?.promptTokenCount ?? 0;
     const outputTokens = meta?.candidatesTokenCount ?? 0;
     const thinkingTokens = meta?.thoughtsTokenCount ?? 0;
 
     const rawCost =
-      (inputTokens / 1_000_000) * this.inputPricePerMillion +
-      ((outputTokens + thinkingTokens) / 1_000_000) * this.outputPricePerMillion;
+      (inputTokens / 1_000_000) * price.inputPerMillion +
+      ((outputTokens + thinkingTokens) / 1_000_000) * price.outputPerMillion;
 
     // Round to 8 decimals to hide floating-point noise like 0.0012645000000000002
     const costUsd = Math.round(rawCost * 1e8) / 1e8;
@@ -190,13 +288,11 @@ export class ChatService {
   // Translate a Gemini failure into a detailed error for OUR client.
   // Google's full message goes to the server log; the client gets facts it can act on,
   // but never anything about our API key.
-  private toAppException(error: unknown, elapsedMs: number): AppException {
-    const model = this.model;
-
+  private toAppException(error: unknown, model: string, elapsedMs: number): AppException {
     if (error instanceof ApiError) {
       const google = this.parseGoogleError(error.message);
       const providerStatus = google.error?.status ?? String(error.status);
-      this.logger.error(`Gemini API error ${error.status} ${providerStatus} after ${elapsedMs}ms: ${google.error?.message ?? error.message}`);
+      this.logger.error(`Gemini API error ${error.status} ${providerStatus} for "${model}" after ${elapsedMs}ms: ${google.error?.message ?? error.message}`);
 
       const details = google.error?.details ?? [];
       const quotaId = details.flatMap((d) => d.violations ?? []).find((v) => v.quotaId)?.quotaId;
@@ -214,7 +310,7 @@ export class ChatService {
             {
               hint:
                 'Each model allows a limited number of requests per day on the free tier. ' +
-                'It resets at midnight Pacific time, or switch GEMINI_MODEL to another model.',
+                'It resets at midnight Pacific time, or add more models to GEMINI_FALLBACK_MODELS.',
               details: { model, quota: quotaId, limit: quotaLimit, providerStatus, retryAfterSeconds },
             },
           );
@@ -238,7 +334,7 @@ export class ChatService {
           'AI_OVERLOADED',
           `The AI model "${model}" is currently overloaded or unavailable`,
           {
-            hint: "This is on Google's side and usually temporary. Try again in a minute, or switch GEMINI_MODEL.",
+            hint: "This is on Google's side and usually temporary. Try again in a minute.",
             retryable: true,
             details: { model, providerStatusCode: error.status, providerStatus, elapsedMs },
           },
@@ -253,7 +349,7 @@ export class ChatService {
         {
           hint:
             error.status === 404
-              ? `The model "${model}" does not exist or is not available to this API key. Check GEMINI_MODEL.`
+              ? `The model "${model}" does not exist or is not available to this API key. Check GEMINI_MODEL and GEMINI_FALLBACK_MODELS.`
               : 'Check GEMINI_API_KEY and GEMINI_MODEL in the server .env (details are in the server log).',
           details: { model, providerStatusCode: error.status, providerStatus },
         },
@@ -262,7 +358,7 @@ export class ChatService {
 
     // The request took longer than GEMINI_TIMEOUT_MS and was cancelled
     if (error instanceof Error && (error.name === 'AbortError' || /abort|timeout/i.test(error.message))) {
-      this.logger.error(`Gemini request timed out after ${elapsedMs}ms: ${error.message}`);
+      this.logger.error(`Gemini request to "${model}" timed out after ${elapsedMs}ms: ${error.message}`);
       return new AppException(
         HttpStatus.GATEWAY_TIMEOUT,
         'AI_TIMEOUT',
