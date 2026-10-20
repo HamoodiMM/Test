@@ -70,7 +70,7 @@ export class ConversationsService {
   async addExchange(
     conversation: ConversationDocument,
     userText: string,
-    reply: { text: string; tokens: number; costUsd: number },
+    reply: { text: string; tokens: number; costUsd: number; model: string },
   ): Promise<void> {
     conversation.messages.push({ role: 'user', text: userText });
     conversation.messages.push({
@@ -78,6 +78,7 @@ export class ConversationsService {
       text: reply.text,
       tokens: reply.tokens,
       costUsd: reply.costUsd,
+      model: reply.model,
     });
     conversation.totalTokens += reply.tokens;
     conversation.totalCostUsd += reply.costUsd;
